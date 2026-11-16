@@ -1,0 +1,13 @@
+'use strict';
+const runtime = require('./lib/runtime');
+const ctx = runtime.init();
+const express = require('express');
+const path = require('path');
+const app = express();
+app.use(express.json());
+app.use('/api/auto-trade', require('./orderFlowRouter'));
+const gateway = require('./marketGateway');
+gateway.attachRoutes(app);
+app.get(['/', '/pro_order_flow'], (req, res) => res.sendFile(path.join(ctx.root, 'public/pro_order_flow.html')));
+app.use(express.static(path.join(ctx.root, 'public')));
+runtime.serve(app, ctx, gateway.upgrade);

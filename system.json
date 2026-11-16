@@ -1,0 +1,10 @@
+{
+  "id": "pro-order-flow",
+  "name": "PRO ORDER FLOW",
+  "port": 3104,
+  "page": "pro_order_flow.html",
+  "data": [
+    "data/mtf_walls.json",
+    "data/order_flow.sqlite"
+  ]
+}

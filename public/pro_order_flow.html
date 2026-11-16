@@ -1,0 +1,2599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>深度订单流专业版 (Pro Order Flow System)</title>
+    <style>
+        :root {
+            --bg-dark: #0b0e14;
+            --bg-panel: #131722;
+            --bg-hover: #2a2e39;
+            --text-main: #d1d4dc;
+            --text-muted: #787b86;
+            --border-color: #2a2e39;
+            
+            /* 交易颜色 */
+            --buy-color: #26a69a;
+            --buy-bg: rgba(38, 166, 154, 0.15);
+            --sell-color: #ef5350;
+            --sell-bg: rgba(239, 83, 80, 0.15);
+            
+            /* 特殊高亮 */
+            --poc-color: #ffca28;
+            --poc-bg: rgba(255, 202, 40, 0.2);
+            --imbalance-color: #2962ff;
+            --large-order: #ab47bc;
+            
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 顶部工具栏 */
+        .toolbar {
+            height: 40px;
+            background-color: var(--bg-panel);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 15px;
+        }
+
+        .title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            margin-right: 20px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .btn:hover { background-color: var(--bg-hover); }
+        .btn.active { background-color: var(--bg-hover); border-color: var(--buy-color); color: #fff; }
+
+        .status-indicator {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background-color: var(--buy-color);
+            box-shadow: 0 0 5px var(--buy-color);
+        }
+
+        /* 主体布局 */
+        .main-container {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 40px);
+        }
+
+        /* 左侧主图区 (Footprint + Delta) */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .chart-header {
+            height: 30px;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-muted);
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+
+        /* 底部指标区 */
+        .indicator-panel {
+            height: 150px;
+            border-top: 1px solid var(--border-color);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .indicator-header {
+            height: 20px;
+            padding: 0 10px;
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            background-color: rgba(0,0,0,0.2);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .delta-canvas-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        /* 右侧面板 (DOM + VP + 大单) */
+        .right-panel {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-panel);
+            border-left: 1px solid var(--border-color);
+        }
+
+        .panel-section {
+            /* 移除默认的 flex: 1，由内联样式或具体类来控制 */
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .panel-section:last-child { border-bottom: none; }
+
+        .section-header {
+            padding: 5px 10px;
+            background-color: var(--bg-hover);
+            font-weight: bold;
+            color: #fff;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* DOM 深度样式 */
+        .dom-container {
+            flex: 1;
+            overflow-y: auto; /* 允许滚动以适应不同的行数 */
+            display: flex;
+            flex-direction: column;
+            font-size: 11px; /* 稍微缩小字体以适应更多行 */
+        }
+        
+        .dom-half {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end; /* 卖盘靠下对齐，买盘靠上对齐（默认） */
+        }
+        
+        .dom-sell-half {
+            justify-content: flex-end; /* 让卖盘贴着中间价差 */
+        }
+
+        .dom-buy-half {
+            justify-content: flex-start; /* 让买盘贴着中间价差 */
+        }
+
+        .dom-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 1px 10px; /* 减小内边距 */
+            position: relative;
+            min-height: 18px; /* 固定最小高度 */
+            align-items: center;
+        }
+        
+        .dom-row::before {
+            content: '';
+            position: absolute;
+            top: 0; bottom: 0; right: 0;
+            z-index: 0;
+        }
+        
+        .dom-sell::before { background-color: var(--sell-bg); }
+        .dom-buy::before { background-color: var(--buy-bg); }
+
+        .dom-cell { z-index: 1; text-align: right; flex: 1; }
+        .dom-cell.price { text-align: left; font-weight: bold; }
+        .dom-sell .price { color: var(--sell-color); }
+        .dom-buy .price { color: var(--buy-color); }
+        
+        .dom-spread {
+            text-align: center;
+            padding: 4px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+            background-color: var(--bg-dark);
+        }
+
+        /* 大单列表样式 */
+        .tape-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px 0;
+        }
+        .tape-row {
+            display: flex;
+            padding: 3px 10px;
+            gap: 10px;
+        }
+        .tape-time { color: var(--text-muted); width: 60px; }
+        .tape-price { flex: 1; font-weight: bold; }
+        .tape-size { width: 60px; text-align: right; }
+        .tape-buy { color: var(--buy-color); }
+        .tape-sell { color: var(--sell-color); }
+        .tape-large { background-color: rgba(171, 71, 188, 0.2); }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #434651; border-radius: 2px; }
+
+        /* 悬浮提示框 (Tooltip) */
+        #tooltip {
+            position: fixed;
+            background: rgba(19, 23, 34, 0.95);
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            white-space: pre;
+            line-height: 1.5;
+        }
+
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+    <div class="toolbar">
+        <div class="title">PRO ORDER FLOW</div>
+        
+        <div class="btn-group">
+            <button class="btn active" data-tf="1">1m</button>
+            <button class="btn" data-tf="5">5m</button>
+            <button class="btn" data-tf="15">15m</button>
+            <button class="btn" data-tf="60">1h</button>
+            <button class="btn" data-tf="240">4h</button>
+            <button class="btn" data-tf="1440">1D</button>
+        </div>
+        
+        <span id="candle-countdown" style="margin-left: 15px; font-family: Consolas; color: #ffca28; font-size: 14px; font-weight: bold; line-height: 32px;">⏳ --:--</span>
+
+        <div class="btn-group" style="margin-left: 20px;">
+            <button class="btn active" id="btn-play">■ 实时</button>
+            <button class="btn" id="btn-pause">▶ 回放</button>
+        </div>
+
+        <div class="btn-group" style="margin-left: 20px;">
+            <select id="fp-mode-select" class="btn" style="background-color: transparent; border-color: var(--border-color); color: var(--text-main); outline: none;">
+                <option value="volume">Volume</option>
+                <option value="bidask" selected>BidAsk</option>
+                <option value="delta">Delta Profile</option>
+                <option value="volumedelta">Volume&Delta</option>
+            </select>
+        </div>
+
+        <div class="btn-group" style="margin-left: 20px;">
+            <button class="btn" id="btn-ruler">📏 测量</button>
+            <button class="btn" id="btn-screenshot">📸 截图</button>
+        </div>
+
+        <div class="status-indicator">
+            <div class="dot" id="conn-dot"></div>
+            <span id="conn-status">真实数据流连线中...</span>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- 左侧图表区 -->
+        <div class="left-panel">
+            <div class="chart-header">
+                BTCUSDT 现货 &nbsp;&nbsp;|&nbsp;&nbsp; Footprint (Bid x Ask) &nbsp;&nbsp;|&nbsp;&nbsp; Tick Size: 10.0
+            </div>
+            
+            <div class="canvas-container" id="fp-container">
+                <!-- 采用多层 Canvas 优化性能：底层画网格，中层画 Footprint，上层画交互光标 -->
+                <canvas id="fp-grid-canvas"></canvas>
+                <canvas id="fp-main-canvas"></canvas>
+                <canvas id="fp-ui-canvas"></canvas>
+            </div>
+
+            <!-- 底部指标区：Delta 柱状图 -->
+            <div class="indicator-panel" id="delta-container">
+                <div class="indicator-header">Bar Delta (买卖差) & CVD</div>
+                <div class="delta-canvas-wrapper">
+                    <canvas id="delta-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧数据区 -->
+        <div class="right-panel">
+            <!-- 盘口深度 DOM -->
+            <div class="panel-section" style="flex: 1.5; min-height: 0;">
+                <div class="section-header">
+                    <span id="dom-heading">DOM (当前实时盘口)</span>
+                    <span style="color:var(--text-muted)">Q / P</span>
+                </div>
+                <div class="dom-container" id="dom-list">
+                    <!-- DOM 内容由 JS 动态生成 -->
+                </div>
+            </div>
+
+            <!-- Volume Profile -->
+            <div class="panel-section" style="flex: 0 0 250px; min-height: 250px; max-height: 250px;">
+                <div class="section-header">
+                    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Volume Profile & Buy/Sell Walls</span>
+                    <span style="color:var(--text-muted);flex-shrink:0">VA 70%</span>
+                </div>
+                <div id="vp-range" style="padding:3px 10px;font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">可见范围 · 等待归档</div>
+                <div id="vp-coverage" style="padding:0 10px 3px;font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">未采集的历史不会补造</div>
+                <div style="display:flex;gap:6px;padding:0 10px 3px;font-size:11px;flex-shrink:0;min-width:0">
+                    <span id="vp-backfill" style="color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">历史成交按可见范围自动回补</span>
+                    <button id="vp-backfill-retry" hidden style="flex-shrink:0">重试</button>
+                </div>
+                <div class="canvas-container" style="flex: 1; padding: 5px;" id="vp-container">
+                    <canvas id="vp-canvas"></canvas>
+                </div>
+            </div>
+
+            <!-- 实时大单 Time & Sales -->
+            <div class="panel-section" style="flex: 1; min-height: 0;">
+                <div class="section-header">
+                    <span>大单追踪 (Smart Tape)</span>
+                    <span style="color:var(--large-order)">> 1.0</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; padding: 5px 10px; font-size: 11px; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border-color);">
+                    <span style="color: var(--buy-color);">买(累计): <span id="tape-buy-total">0.00</span></span>
+                    <span style="color: var(--sell-color);">卖(累计): <span id="tape-sell-total">0.00</span></span>
+                </div>
+                <div class="tape-container" id="tape-list">
+                    <!-- Tape 内容由 JS 动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+<script src="/order-flow/profile.js"></script>
+<script>
+/**
+ * 核心引擎：深度订单流系统
+ * 包含：真实成交归档、Canvas 渲染引擎、UI 交互
+ */
+
+// ================= 全局配置与状态 =================
+const CONFIG = {
+    tickSize: 10.0,       // 价格聚合档位 (BTC 默认 10 刀一档)
+    timeframe: 1 * 60 * 1000, // 默认 1 分钟 K 线
+    candleWidth: 80,      // K 线占据的像素宽度
+    rowHeight: 18,        // 每个价格格子的像素高度
+    imbalanceRatio: 3.0,  // 失衡比例 (买/卖 或 卖/买 > 3)
+    largeOrderThr: 1.0,   // 大单阈值 (数量)
+    domLevels: 15         // DOM 显示档数
+};
+
+const STATE = {
+    isRunning: true,
+    currentPrice: 63500.0,
+    historyTicks: [],     // 保存所有的 tick 数据
+    footprints: [],       // 聚合后的 K 线 Footprint 数据
+    globalVolumeProfile: new Map(), // 仅当前可见时间范围的成交分布
+    archiveVersion: 0,
+    archiveAvailable: false,
+    profileRange: null,
+    profileCacheKey: null,
+    profileNotification: null,
+    lastBrowserAggId: null,
+    realBuyWall: null,    // 真实的挂单买墙 (来自 depth)
+    realSellWall: null,   // 真实的挂单卖墙 (来自 depth)
+    totalLargeBuy: 0,     // 累计买入大单量
+    totalLargeSell: 0,    // 累计卖出大单量
+    offsetX: 0,           // 图表平移偏移量 X
+    offsetY: 0,           // 图表平移偏移量 Y
+    scaleX: 1.0,          // X 轴缩放
+    scaleY: 1.0,          // Y 轴缩放
+    hovered: null,        // 鼠标悬停的光标信息 {x, y, inDelta}
+    rulerMode: false,     // 是否处于测量模式
+    rulerStart: null,     // 测量起点 {x, y, price, index}
+    rulerCurrent: null,   // 测量当前点 {x, y, price, index}
+    fpMode: 'bidask'      // K 线图渲染模式
+};
+
+// ================= DOM 元素获取 =================
+const canvasFPMain = document.getElementById('fp-main-canvas');
+const ctxFP = canvasFPMain.getContext('2d');
+const canvasFPUI = document.getElementById('fp-ui-canvas');
+const ctxUI = canvasFPUI.getContext('2d');
+const fpContainer = document.getElementById('fp-container');
+const tooltip = document.getElementById('tooltip');
+
+const domList = document.getElementById('dom-list');
+const tapeList = document.getElementById('tape-list');
+
+const canvasVP = document.getElementById('vp-canvas');
+const ctxVP = canvasVP.getContext('2d');
+const vpContainer = document.getElementById('vp-container');
+
+const canvasDelta = document.getElementById('delta-canvas');
+const ctxDelta = canvasDelta.getContext('2d');
+const deltaContainer = document.querySelector('.delta-canvas-wrapper');
+
+
+// 自适应 Canvas 尺寸
+function resizeCanvas() {
+    const rect = fpContainer.getBoundingClientRect();
+    canvasFPMain.width = rect.width; canvasFPMain.height = rect.height;
+    canvasFPUI.width = rect.width; canvasFPUI.height = rect.height;
+    
+    const vpRect = vpContainer.getBoundingClientRect();
+    if(vpRect.width > 0 && vpRect.height > 0) {
+        canvasVP.width = vpRect.width; canvasVP.height = vpRect.height;
+    }
+
+    const deltaRect = deltaContainer.getBoundingClientRect();
+    if(deltaRect.width > 0 && deltaRect.height > 0) {
+        canvasDelta.width = deltaRect.width; canvasDelta.height = deltaRect.height;
+    }
+
+    // 初始化居中偏移 (让最新价格在中间偏右)
+    if (STATE.offsetY === 0 || STATE.isRunning) {
+        STATE.offsetY = (rect.height / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+        if (STATE.offsetY === 0) STATE.offsetX = 0; // 初次加载，offsetX 为 0 即可保证最新 K 线在 width - 300 的位置
+    }
+    renderAll();
+}
+window.addEventListener('resize', resizeCanvas);
+
+// ================= 数据结构定义 =================
+
+// 单个价格格子 (Footprint Cell)
+class FPCell {
+    constructor(price) {
+        this.price = price;
+        this.buyVol = 0;
+        this.sellVol = 0;
+    }
+    get totalVol() { return this.buyVol + this.sellVol; }
+    get delta() { return this.buyVol - this.sellVol; }
+    // 检查是否失衡
+    get buyImbalance() { return this.buyVol > this.sellVol * CONFIG.imbalanceRatio && this.buyVol > 5; }
+    get sellImbalance() { return this.sellVol > this.buyVol * CONFIG.imbalanceRatio && this.sellVol > 5; }
+}
+
+// 单根 K 线 (Footprint Bar)
+class FPBar {
+    constructor(startTime) {
+        this.startTime = startTime;
+        this.open = STATE.currentPrice;
+        this.high = STATE.currentPrice;
+        this.low = STATE.currentPrice;
+        this.close = STATE.currentPrice;
+        this.cells = new Map(); // key: priceLevel, value: FPCell
+        this.klineDelta = null;
+        this.coverage = 'missing';
+    }
+
+    addTick(price, qty, isBuyerMaker) {
+        this.high = Math.max(this.high, price);
+        this.low = Math.min(this.low, price);
+        this.close = price;
+        if (this.klineDelta !== null) this.klineDelta += isBuyerMaker ? -qty : qty;
+
+        // 计算聚合档位
+        const level = Math.floor(price / CONFIG.tickSize) * CONFIG.tickSize;
+        if (!this.cells.has(level)) {
+            this.cells.set(level, new FPCell(level));
+        }
+        
+        const cell = this.cells.get(level);
+        if (isBuyerMaker) {
+            cell.sellVol += qty; // 主动卖出
+        } else {
+            cell.buyVol += qty;  // 主动买入
+        }
+    }
+
+    get totalDelta() {
+        if (this.klineDelta !== null) return this.klineDelta;
+        let d = 0;
+        this.cells.forEach(c => d += c.delta);
+        return d;
+    }
+
+    // 获取 POC (成交量最大的格子)
+    get pocLevel() {
+        let maxV = -1;
+        let pLevel = 0;
+        this.cells.forEach((c, lvl) => {
+            if (c.totalVol > maxV) { maxV = c.totalVol; pLevel = lvl; }
+        });
+        return pLevel;
+    }
+}
+
+// ================= 真实数据引擎 (Binance API) =================
+
+let ws = null;
+let loadGeneration = 0;
+let reconnectTimer = null;
+let archiveTimer = null;
+let archiveRequest = null;
+let wsDepth = null;
+let currentSymbol = 'btcusdt';
+let currentBinanceTF = '1m';
+
+function initEngine() {
+    loadHistoricalAndConnect();
+    requestAnimationFrame(renderLoop);
+    setInterval(syncHistoricalBackfill, 5000);
+}
+
+let historicalJob = null;
+let historicalRangeKey = null;
+let historicalRequest = false;
+const historicalClientId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    byte => byte.toString(16).padStart(2, '0')).join('');
+let historicalRetryAt = 0;
+document.getElementById('vp-backfill-retry').addEventListener('click', () => {
+    historicalJob = null;
+    historicalRangeKey = null;
+    historicalRetryAt = 0;
+    syncHistoricalBackfill();
+});
+
+async function syncHistoricalBackfill() {
+    if (historicalRequest || Date.now() < historicalRetryAt ||
+        !STATE.profileRange || !STATE.archiveAvailable) return;
+    const generation = loadGeneration;
+    const start = STATE.profileRange.start;
+    const end = Math.min(STATE.profileRange.end, Math.floor(Date.now() / 60000) * 60000);
+    if (end <= start) return;
+    const key = `${currentBinanceTF}:${start}:${end}`;
+    const statusNode = document.getElementById('vp-backfill');
+    const retryNode = document.getElementById('vp-backfill-retry');
+    historicalRequest = true;
+    try {
+        const options = { signal: AbortSignal.timeout(15000) };
+        if (key !== historicalRangeKey) {
+            const response = await fetch('/api/auto-trade/orderflow/backfill', {
+                ...options, method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ startTime: start, endTime: end, clientId: historicalClientId })
+            });
+            const body = await response.json();
+            if (generation !== loadGeneration) return;
+            historicalRangeKey = key;
+            if (response.status === 429) {
+                historicalRangeKey = null;
+                historicalJob = null;
+                historicalRetryAt = Date.now() + 15000;
+                statusNode.textContent = '回补繁忙 · 15 秒后自动重试';
+                statusNode.title = statusNode.textContent;
+                retryNode.hidden = true;
+                return;
+            }
+            if (!response.ok || !body.ok) throw new Error(body.error || '回补请求失败');
+            historicalJob = body.job;
+        } else if (historicalJob && !['complete', 'failed', 'partial'].includes(historicalJob.state)) {
+            const response = await fetch(`/api/auto-trade/orderflow/backfill/${historicalJob.id}`, options);
+            const body = await response.json();
+            if (generation !== loadGeneration) return;
+            if (!response.ok || !body.ok) {
+                historicalJob = null;
+                throw new Error(body.error || '回补状态读取失败');
+            }
+            historicalJob = body.job;
+        } else return;
+        const job = historicalJob;
+        if (job.state === 'cancelled') {
+            historicalRangeKey = null;
+            historicalJob = null;
+            historicalRetryAt = Date.now() + 15000;
+            statusNode.textContent = '回补正在调度 · 稍后自动继续';
+            statusNode.title = statusNode.textContent;
+            retryNode.hidden = true;
+            return;
+        }
+        statusNode.textContent = job.state === 'failed' ? `回补失败：${job.error}`
+            : job.state === 'partial' ? `已回补 ${job.completed}/${job.total} 分钟 · ${job.skipped} 分钟仍有缺口`
+            : job.state === 'complete' ? `历史回补完成 ${job.completed}/${job.total} 分钟`
+            : `历史回补${job.state === 'queued'
+                ? ({ rotating: '分批轮转中', splitting: '拆分核验中', retrying: '自动重试中' }[job.phase] || '准备中')
+                : '下载中'} ${job.completed}/${job.total} 分钟`;
+        statusNode.title = statusNode.textContent;
+        retryNode.hidden = !['failed', 'partial'].includes(job.state);
+        // Refresh archived snapshots in history mode too. Backfill is not a market signal.
+        for (let cursor = start; cursor < STATE.profileRange.end; ) {
+            const tf = CONFIG.timeframe;
+            const batchEnd = Math.min(STATE.profileRange.end, cursor + 150 * tf);
+            const response = await fetch(`/api/auto-trade/orderflow/history?tf=${currentBinanceTF}&endTime=${batchEnd - 1}&limit=${(batchEnd - cursor) / tf}`,
+                { signal: AbortSignal.timeout(15000) });
+            const body = await response.json();
+            if (generation !== loadGeneration || STATE.profileRange?.start !== start) return;
+            if (!response.ok || !body.ok) throw new Error('回补数据刷新失败');
+            const snapshots = new Map(body.data.map(bar => [bar.startTime, bar]));
+            for (const bar of STATE.footprints) {
+                if (snapshots.has(bar.startTime)) OrderFlowProfile.replaceCells(bar, snapshots.get(bar.startTime), FPCell);
+            }
+            cursor = batchEnd;
+        }
+        STATE.archiveVersion++;
+        STATE.profileNotification = null;
+        renderAll();
+    } catch (error) {
+        if (generation === loadGeneration) {
+            historicalRangeKey = key;
+            historicalJob = { state: 'failed' };
+            statusNode.textContent = `回补失败：${error.message}`;
+            statusNode.title = statusNode.textContent;
+            retryNode.hidden = false;
+        }
+    } finally { historicalRequest = false; }
+}
+
+async function loadHistoricalAndConnect() {
+    const generation = ++loadGeneration;
+    clearTimeout(reconnectTimer);
+    clearInterval(archiveTimer);
+    STATE.archiveAvailable = false;
+    STATE.profileNotification = null;
+    STATE.profileCacheKey = null;
+    STATE.lastBrowserAggId = null;
+    STATE.realBuyWall = null;
+    STATE.realSellWall = null;
+    historicalRangeKey = null;
+    historicalJob = null;
+    isLoadingMoreHistory = false;
+    document.getElementById('conn-status').textContent = '加载历史数据...';
+    document.getElementById('conn-dot').style.backgroundColor = '#ff9800';
+    
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+    }
+    // 注意：wsDepth 已经废弃合并到 ws 中，防止报错还是清理一下
+    if (window.wsDepth) {
+        window.wsDepth.close();
+        window.wsDepth = null;
+    }
+
+    try {
+        // 清空大单追踪状态 (如果后端没有数据则使用此默认值)
+        STATE.totalLargeBuy = 0;
+        STATE.totalLargeSell = 0;
+        document.getElementById('tape-buy-total').innerText = '0.00';
+        document.getElementById('tape-sell-total').innerText = '0.00';
+        document.getElementById('tape-list').innerHTML = '';
+        
+        hasNoMoreHistory = false; // 切换周期时重置
+
+        // 并行拉取 Binance K 线和我们后端的真实 tick 聚合数据
+        const [binanceRes, historyRes] = await Promise.all([
+            fetch(`/api/proxy/klines?symbol=${currentSymbol.toUpperCase()}&interval=${currentBinanceTF}&limit=150`),
+            fetch(`/api/auto-trade/orderflow/history?tf=${currentBinanceTF}`).catch(() => ({ json: () => ({ ok: false }) }))
+        ]);
+        
+        const klines = await binanceRes.json();
+        const historyData = await historyRes.json();
+        if (generation !== loadGeneration) return;
+        if (!binanceRes.ok || !Array.isArray(klines)) throw new Error('K线数据暂不可用');
+        const realOrderFlow = historyData.ok ? historyData.data : [];
+        STATE.archiveAvailable = !!historyData.ok;
+        
+        // 恢复后端保存的大单追踪数据
+        if (historyData.ok && historyData.largeOrderStats) {
+            STATE.totalLargeBuy = historyData.largeOrderStats.totalBuy;
+            STATE.totalLargeSell = historyData.largeOrderStats.totalSell;
+            document.getElementById('tape-buy-total').innerText = STATE.totalLargeBuy.toFixed(2);
+            document.getElementById('tape-sell-total').innerText = STATE.totalLargeSell.toFixed(2);
+            
+            // 倒序恢复列表 (因为 addTapeRecord 是 insertBefore)
+            if (historyData.largeOrders && historyData.largeOrders.length > 0) {
+                // historyData.largeOrders 是最新的在最前面 [0]=newest
+                // 我们需要从最老的开始 addTapeRecord，这样最新的才会在最上面
+                for (let i = historyData.largeOrders.length - 1; i >= 0; i--) {
+                    const order = historyData.largeOrders[i];
+                    // 第五个参数设置为 true，代表这是历史恢复，不要再重复累加 totalLargeBuy/Sell
+                    addTapeRecord(order.price, order.qty, order.isSell, order.timeMs, true);
+                }
+            }
+        }
+        
+        buildHistoricalFootprint(klines, realOrderFlow);
+        
+        const rect = fpContainer.getBoundingClientRect();
+        STATE.offsetY = (rect.height / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+        STATE.offsetX = 0;
+        renderAll();
+        
+        connectWebSocket();
+        archiveTimer = setInterval(syncRecentArchive, 2000);
+    } catch (e) {
+        if (generation !== loadGeneration) return;
+        console.error(e);
+        document.getElementById('conn-status').textContent = '加载失败';
+        document.getElementById('conn-dot').style.backgroundColor = '#ef5350';
+        if (STATE.isRunning) reconnectTimer = setTimeout(loadHistoricalAndConnect, 3000);
+    }
+}
+
+function buildHistoricalFootprint(klines, realOrderFlow = [], prepend = false) {
+    if (!prepend) {
+        STATE.footprints = [];
+        STATE.globalVolumeProfile.clear();
+    }
+    
+    // 将后端传来的真实 tick 数据转为 map 方便 O(1) 查找
+    const realDataMap = new Map();
+    realOrderFlow.forEach(bar => realDataMap.set(bar.startTime, bar));
+    
+    const newBars = [];
+
+    klines.forEach(k => {
+        const startTime = k[0];
+        const open = parseFloat(k[1]);
+        const high = parseFloat(k[2]);
+        const low = parseFloat(k[3]);
+        const close = parseFloat(k[4]);
+        const volume = parseFloat(k[5]);
+        const takerBuyVol = parseFloat(k[9]); // Buy volume
+        const takerSellVol = volume - takerBuyVol; // Sell volume
+
+        let bar = new FPBar(startTime);
+        bar.open = open;
+        bar.high = high;
+        bar.low = low;
+        bar.close = close;
+        // The K-line provides real total Delta, but not a price-level distribution.
+        bar.klineDelta = takerBuyVol - takerSellVol;
+
+        // 如果后端有这一分钟的真实 tick 数据，直接使用
+        if (realDataMap.has(startTime)) {
+            OrderFlowProfile.replaceCells(bar, realDataMap.get(startTime), FPCell);
+        }
+        if (startTime + CONFIG.timeframe > Date.now()) bar.klineDelta = null;
+        // Missing recorded ticks: retain OHLC, but do not invent price-level volume.
+        
+        newBars.push(bar);
+    });
+    
+    if (prepend) {
+        const existing = new Set(STATE.footprints.map(bar => bar.startTime));
+        STATE.footprints = newBars.filter(bar => !existing.has(bar.startTime)).concat(STATE.footprints);
+    } else {
+        STATE.footprints = newBars;
+    }
+    
+    if (STATE.footprints.length > 0 && !prepend) {
+        STATE.currentPrice = STATE.footprints[STATE.footprints.length - 1].close;
+    }
+    STATE.archiveVersion++;
+}
+
+async function syncRecentArchive() {
+    if (!STATE.isRunning || !STATE.footprints.length) return;
+    const generation = loadGeneration;
+    if (archiveRequest?.generation === generation) return;
+    const request = { generation };
+    archiveRequest = request;
+    try {
+        const response = await fetch(`/api/auto-trade/orderflow/history?tf=${currentBinanceTF}&limit=2`,
+            { signal: AbortSignal.timeout(15000) });
+        const body = await response.json();
+        if (generation !== loadGeneration || !STATE.isRunning) return;
+        if (!response.ok || !body.ok) throw new Error('归档暂不可用');
+        const latest = STATE.footprints.at(-1);
+        // After a background tab suspension or missed minute, reload the K-line time axis too.
+        if (Date.now() - latest.startTime >= CONFIG.timeframe * 2) {
+            loadHistoricalAndConnect();
+            return;
+        }
+        const snapshots = new Map(body.data.map(bar => [bar.startTime, bar]));
+        for (const bar of STATE.footprints) {
+            if (snapshots.has(bar.startTime)) OrderFlowProfile.replaceCells(bar, snapshots.get(bar.startTime), FPCell);
+        }
+        STATE.archiveAvailable = true;
+        STATE.archiveVersion++;
+    } catch (error) {
+        if (generation === loadGeneration) {
+            STATE.archiveAvailable = false;
+            STATE.archiveVersion++;
+            console.warn('Archive sync failed:', error.message);
+        }
+    } finally {
+        if (archiveRequest === request) archiveRequest = null;
+    }
+}
+
+let isLoadingMoreHistory = false;
+let hasNoMoreHistory = false;
+
+async function loadMoreHistory() {
+    if (isLoadingMoreHistory || hasNoMoreHistory || STATE.footprints.length === 0) return;
+    isLoadingMoreHistory = true;
+    const generation = loadGeneration;
+    
+    // UI 提示加载中
+    document.getElementById('conn-status').textContent = '加载更早历史数据...';
+    
+    try {
+        const oldestTime = STATE.footprints[0].startTime;
+        // 拉取更早的150根
+        const [binanceRes, historyRes] = await Promise.all([
+            fetch(`/api/proxy/klines?symbol=${currentSymbol.toUpperCase()}&interval=${currentBinanceTF}&limit=150&endTime=${oldestTime - 1}`),
+            // Only include observations within this historical request.
+            fetch(`/api/auto-trade/orderflow/history?tf=${currentBinanceTF}&endTime=${oldestTime - 1}`).catch(() => ({ json: () => ({ ok: false }) }))
+        ]);
+        
+        const klines = await binanceRes.json();
+        const historyData = await historyRes.json();
+        if (generation !== loadGeneration) return;
+        if (!binanceRes.ok || !Array.isArray(klines)) throw new Error('K线数据暂不可用');
+        const realOrderFlow = historyData.ok ? historyData.data : [];
+        
+        if (klines && klines.length > 0) {
+            buildHistoricalFootprint(klines, realOrderFlow, true);
+            // Coordinates are anchored at the right edge: prepending needs no offset adjustment.
+            const overflow = STATE.footprints.length - 1500;
+            if (overflow > 0) {
+                STATE.footprints.splice(-overflow);
+                STATE.offsetX -= overflow * CONFIG.candleWidth * STATE.scaleX;
+            }
+            STATE.archiveAvailable = !!historyData.ok;
+            renderAll();
+            
+            if (klines.length < 150) {
+                hasNoMoreHistory = true; // 已经拉取到尽头
+            }
+        } else {
+            hasNoMoreHistory = true;
+        }
+    } catch (e) {
+        console.error("加载历史数据失败:", e);
+    } finally {
+        if (generation === loadGeneration) {
+            isLoadingMoreHistory = false;
+            document.getElementById('conn-status').textContent = !STATE.isRunning ? '回放/浏览模式'
+                : ws?.readyState === WebSocket.OPEN ? '已连接真实数据' : '等待数据连接';
+        }
+    }
+}
+
+function connectWebSocket() {
+    clearTimeout(reconnectTimer);
+    const generation = loadGeneration;
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+    }
+    // 启动时同时拉取一次后端的 MTF 墙数据
+    fetch('/api/mtf_walls')
+        .then(res => res.json())
+        .then(data => { STATE.mtfWallsData = data; })
+        .catch(e => console.warn("Failed to fetch initial MTF walls:", e));
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    
+    // 终极杀招：将 aggTrade 和 depth20 强行合并到【同一个】 WebSocket 多路复用连接中！
+    // 既然 depth20 能够完美收到数据，那么同一条 TCP 链路上的 aggTrade 也绝对不会被丢弃！
+    const streams = `${currentSymbol.toLowerCase()}@aggTrade/${currentSymbol.toLowerCase()}@depth20@100ms`;
+    const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/binance/stream?streams=${streams}`);
+    ws = socket;
+    
+    ws.onopen = () => {
+        if (generation !== loadGeneration || ws !== socket) return;
+        if (!STATE.isRunning) return;
+        document.getElementById('conn-status').textContent = '已连接真实数据';
+        document.getElementById('conn-dot').style.backgroundColor = 'var(--buy-color)';
+    };
+    
+    let msgCount = 0;
+    let aggCount = 0;
+    let depthCount = 0;
+    ws.onmessage = async (event) => {
+        if (!STATE.isRunning || generation !== loadGeneration || ws !== socket) return;
+        try {
+            msgCount++;
+            
+            let textData = event.data;
+            if (textData instanceof Blob) {
+                textData = await textData.text();
+            }
+            if (!STATE.isRunning || generation !== loadGeneration || ws !== socket) return;
+            const data = JSON.parse(textData);
+            if (!data) return;
+            
+            // 币安多路复用格式： { stream: "btcusdt@aggTrade", data: {...} }
+            const streamName = data.stream || '';
+            const payload = data.data || data;
+            
+            // 根据 streamName 或 payload 特征分别处理
+            if (streamName.includes('aggTrade') || payload.e === 'aggTrade' || payload.m !== undefined) {
+                aggCount++;
+                handleAggTrade(payload);
+            } else if (streamName.includes('depth') || payload.bids || payload.asks || payload.b || payload.a) {
+                depthCount++;
+                handleDepth(payload);
+            } else {
+                console.log("Unmatched stream data:", data);
+            }
+            
+            if (msgCount % 10 === 0) {
+                document.getElementById('conn-status').textContent = `数据流 (总:${msgCount} 价格:${aggCount} 深度:${depthCount})`;
+            }
+        } catch (e) {
+            console.warn("WebSocket multiplex error:", e);
+        }
+    };
+    
+    ws.onclose = () => {
+        if (STATE.isRunning && generation === loadGeneration && ws === socket) {
+            document.getElementById('conn-status').textContent = '连接断开，重连中...';
+            document.getElementById('conn-dot').style.backgroundColor = '#ef5350';
+            reconnectTimer = setTimeout(connectWebSocket, 3000);
+        }
+    };
+
+    // 3. 定期拉取深度快照 (用于寻找真实的深层挂单墙)
+    if (STATE.depthInterval) clearInterval(STATE.depthInterval);
+    STATE.depthInterval = setInterval(fetchDeepWalls, 2000); // 加快到 2 秒刷新一次
+    fetchDeepWalls(); // 初始拉取一次
+}
+
+async function fetchDeepWalls() {
+    if (!STATE.isRunning) return;
+    try {
+        const res = await fetch(`/api/proxy/depth?symbol=${currentSymbol.toUpperCase()}&limit=1000`);
+        const data = await res.json();
+        if (data && data.bids && data.asks) {
+            const bucketSize = CONFIG.tickSize; // 按图表的格子粒度 (默认 10刀) 聚合挂单
+            
+            let bidBuckets = {};
+            data.bids.forEach(b => {
+                const p = parseFloat(b[0]); const v = parseFloat(b[1]);
+                const bLevel = Math.floor(p / bucketSize) * bucketSize;
+                bidBuckets[bLevel] = (bidBuckets[bLevel] || 0) + v;
+            });
+            let realMaxBidVol = 0; let realMaxBidPrice = 0;
+            for(let level in bidBuckets) {
+                if (bidBuckets[level] > realMaxBidVol) {
+                    realMaxBidVol = bidBuckets[level];
+                    realMaxBidPrice = parseFloat(level);
+                }
+            }
+            
+            // 引入防抖(Hysteresis)逻辑，过滤机构挂撤单(Spoofing)和绝对值微小超越导致的跳动
+            if (!STATE.realBuyWall || STATE.realBuyWall.price === 0) {
+                STATE.realBuyWall = { price: realMaxBidPrice, vol: realMaxBidVol };
+            } else {
+                const oldVol = bidBuckets[STATE.realBuyWall.price] || 0;
+                // 只有当新墙比旧墙大 20% 以上，或者旧墙已经大幅撤单（小于新墙一半），才转移目标
+                if (realMaxBidVol > oldVol * 1.2 || oldVol < realMaxBidVol * 0.5) {
+                    STATE.realBuyWall = { price: realMaxBidPrice, vol: realMaxBidVol };
+                } else {
+                    STATE.realBuyWall.vol = oldVol; // 咬死旧墙，只更新挂单量
+                }
+            }
+            
+            let askBuckets = {};
+            data.asks.forEach(a => {
+                const p = parseFloat(a[0]); const v = parseFloat(a[1]);
+                // 卖单同样向下取整聚合，保证和图表价格格子对齐
+                const bLevel = Math.floor(p / bucketSize) * bucketSize;
+                askBuckets[bLevel] = (askBuckets[bLevel] || 0) + v;
+            });
+            let realMaxAskVol = 0; let realMaxAskPrice = 0;
+            for(let level in askBuckets) {
+                if (askBuckets[level] > realMaxAskVol) {
+                    realMaxAskVol = askBuckets[level];
+                    realMaxAskPrice = parseFloat(level);
+                }
+            }
+            
+            if (!STATE.realSellWall || STATE.realSellWall.price === 0) {
+                STATE.realSellWall = { price: realMaxAskPrice, vol: realMaxAskVol };
+            } else {
+                const oldVol = askBuckets[STATE.realSellWall.price] || 0;
+                if (realMaxAskVol > oldVol * 1.2 || oldVol < realMaxAskVol * 0.5) {
+                    STATE.realSellWall = { price: realMaxAskPrice, vol: realMaxAskVol };
+                } else {
+                    STATE.realSellWall.vol = oldVol;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Failed to fetch deep walls:", e);
+    }
+}
+
+function handleAggTrade(data) {
+    const price = parseFloat(data.p);
+    const qty = parseFloat(data.q);
+    const isBuyerMaker = data.m; // true = active sell
+    const time = Number(data.T);
+    const id = Number(data.a);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0 ||
+        !Number.isSafeInteger(time) || !Number.isSafeInteger(id) ||
+        (STATE.lastBrowserAggId !== null && id <= STATE.lastBrowserAggId)) return;
+    STATE.lastBrowserAggId = id;
+    
+    STATE.currentPrice = price;
+    
+    if (STATE.footprints.length === 0) return;
+    
+    let currBar = STATE.footprints[STATE.footprints.length - 1];
+    
+    // Check if new bar is needed based on timeframe
+    if (time >= currBar.startTime + CONFIG.timeframe) {
+        const newStartTime = Math.floor(time / CONFIG.timeframe) * CONFIG.timeframe;
+        if (newStartTime - currBar.startTime > CONFIG.timeframe) {
+            loadHistoricalAndConnect();
+            return;
+        }
+        currBar = new FPBar(newStartTime);
+        currBar.open = price;
+        STATE.footprints.push(currBar);
+        if (STATE.footprints.length > 1500) STATE.footprints.shift();
+        STATE.archiveVersion++;
+    }
+
+    // Price/tape remain immediate. Price-level volume has one owner: the server archive.
+    currBar.high = Math.max(currBar.high, price);
+    currBar.low = Math.min(currBar.low, price);
+    currBar.close = price;
+
+    if (qty >= CONFIG.largeOrderThr) {
+        addTapeRecord(price, qty, isBuyerMaker, time);
+    }
+}
+
+// ================= DOM 与 Tape UI 更新 =================
+
+function handleDepth(data) {
+    if (!STATE.isRunning || !data) return;
+    
+    // 币安 @depth20 返回的是 asks/bids，如果是 @depth 更新流返回的是 a/b
+    const asksData = data.asks || data.a;
+    const bidsData = data.bids || data.b;
+    
+    if (!asksData || !bidsData || asksData.length === 0 || bidsData.length === 0) {
+        return;
+    }
+    
+    let html = '';
+    const cp = STATE.currentPrice;
+    
+    // Asks (Sells)
+    const asks = asksData.slice(0, CONFIG.domLevels).reverse();
+    
+    let maxVol = 0;
+    asksData.slice(0, CONFIG.domLevels).forEach(a => {
+        const v = parseFloat(a[1]);
+        if (v > maxVol) maxVol = v;
+    });
+    
+    bidsData.slice(0, CONFIG.domLevels).forEach(b => {
+        const v = parseFloat(b[1]);
+        if (v > maxVol) maxVol = v;
+    });
+    if (maxVol === 0) maxVol = 1;
+
+    html += '<div class="dom-half dom-sell-half">';
+    
+    asks.forEach(ask => {
+        const p = parseFloat(ask[0]);
+        const vol = parseFloat(ask[1]);
+        const width = (vol / maxVol) * 100;
+        html += `<div class="dom-row dom-sell">
+            <div style="position:absolute; top:0; right:0; bottom:0; width:${width}%; background-color:var(--sell-bg); z-index:0;"></div>
+            <div class="dom-cell price">${p.toFixed(1)}</div>
+            <div class="dom-cell">${vol.toFixed(3)}</div>
+        </div>`;
+    });
+    
+    html += `</div><div class="dom-spread">${cp.toFixed(1)}</div><div class="dom-half dom-buy-half">`;
+    
+    const bids = bidsData.slice(0, CONFIG.domLevels);
+    bids.forEach(bid => {
+        const p = parseFloat(bid[0]);
+        const vol = parseFloat(bid[1]);
+        const width = (vol / maxVol) * 100;
+        html += `<div class="dom-row dom-buy">
+            <div style="position:absolute; top:0; right:0; bottom:0; width:${width}%; background-color:var(--buy-bg); z-index:0;"></div>
+            <div class="dom-cell price">${p.toFixed(1)}</div>
+            <div class="dom-cell">${vol.toFixed(3)}</div>
+        </div>`;
+    });
+    
+    html += '</div>';
+    domList.innerHTML = html;
+}
+
+function addTapeRecord(price, qty, isSell, timeMs, isHistory = false) {
+    if (!isHistory) {
+        if (isSell) {
+            STATE.totalLargeSell += qty;
+            document.getElementById('tape-sell-total').innerText = STATE.totalLargeSell.toFixed(2);
+        } else {
+            STATE.totalLargeBuy += qty;
+            document.getElementById('tape-buy-total').innerText = STATE.totalLargeBuy.toFixed(2);
+        }
+    }
+
+    const timeStr = new Date(timeMs || Date.now()).toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const row = document.createElement('div');
+    row.className = `tape-row tape-large ${isSell ? 'tape-sell' : 'tape-buy'}`;
+    row.innerHTML = `
+        <div class="tape-time">${timeStr}</div>
+        <div class="tape-price">${price.toFixed(1)}</div>
+        <div class="tape-size">${qty.toFixed(3)}</div>
+    `;
+    tapeList.insertBefore(row, tapeList.firstChild);
+    if (tapeList.children.length > 30) {
+        tapeList.removeChild(tapeList.lastChild);
+    }
+}
+
+// ================= Canvas 渲染引擎 =================
+
+function resizeCanvas() {
+    const rect = fpContainer.getBoundingClientRect();
+    canvasFPMain.width = rect.width; canvasFPMain.height = rect.height;
+    canvasFPUI.width = rect.width; canvasFPUI.height = rect.height;
+    
+    const vpRect = vpContainer.getBoundingClientRect();
+    if(vpRect.width > 0 && vpRect.height > 0) {
+        canvasVP.width = vpRect.width; canvasVP.height = vpRect.height;
+    }
+
+    const deltaRect = deltaContainer.getBoundingClientRect();
+    if(deltaRect.width > 0 && deltaRect.height > 0) {
+        canvasDelta.width = deltaRect.width; canvasDelta.height = deltaRect.height;
+    }
+
+    // 初始化居中偏移 (让最新价格在中间偏右)
+    if (STATE.offsetY === 0) {
+        STATE.offsetY = (rect.height / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+        STATE.offsetX = 0; // 初始化时 offsetX 为 0
+    }
+    renderAll();
+}
+window.addEventListener('resize', resizeCanvas);
+
+function renderLoop() {
+    renderAll();
+    if (STATE.isRunning) {
+        requestAnimationFrame(renderLoop);
+    }
+}
+
+// 坐标转换工具函数
+function priceToY(price) {
+    return canvasFPMain.height - ((price / CONFIG.tickSize) * CONFIG.rowHeight + STATE.offsetY) * STATE.scaleY;
+}
+
+function yToPrice(y) {
+    return ((canvasFPMain.height - y) / STATE.scaleY - STATE.offsetY) / CONFIG.rowHeight * CONFIG.tickSize;
+}
+
+function timeToIndex(time) {
+    return STATE.footprints.findIndex(b => b.startTime === time);
+}
+
+function indexToX(index) {
+    // 从右往左画。300px 的右侧边距（完美避开 75px的价格轴和 140px的单墙标签）
+    return canvasFPMain.width - 300 + STATE.offsetX - (STATE.footprints.length - 1 - index) * CONFIG.candleWidth * STATE.scaleX;
+}
+
+function xToIndex(x) {
+    const diffX = canvasFPMain.width - 300 + STATE.offsetX - x;
+    return STATE.footprints.length - 1 - Math.round(diffX / (CONFIG.candleWidth * STATE.scaleX));
+}
+
+function updateVisibleProfile() {
+    const [first, end] = OrderFlowProfile.visibleIndices(STATE.footprints.length, canvasFPMain.width,
+        STATE.offsetX, CONFIG.candleWidth * STATE.scaleX);
+    const bars = STATE.footprints.slice(first, end);
+    const range = bars.length ? {
+        start: bars[0].startTime, end: bars.at(-1).startTime + CONFIG.timeframe,
+        price: bars.at(-1).close
+    } : null;
+    const key = `${range?.start}:${range?.end}:${STATE.archiveVersion}:${STATE.isRunning}:${STATE.archiveAvailable}`;
+    if (key === STATE.profileCacheKey) return;
+    STATE.profileCacheKey = key;
+    STATE.profileRange = range;
+    STATE.globalVolumeProfile = OrderFlowProfile.aggregate(bars);
+    const rangeNode = document.getElementById('vp-range');
+    const coverageNode = document.getElementById('vp-coverage');
+    const format = time => new Date(time).toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+    });
+    rangeNode.textContent = range
+        ? `可见 ${format(range.start)} ~ ${format(range.end)} (UTC+8)`
+        : '可见范围内没有 K 线';
+    rangeNode.title = rangeNode.textContent;
+    const complete = bars.filter(bar => bar.coverage === 'complete').length;
+    const missing = bars.filter(bar => bar.coverage === 'missing').length;
+    coverageNode.textContent = !STATE.archiveAvailable ? '归档不可用 · 当前分布可能不完整'
+        : !bars.length ? '移动图表查看已采集的时间段'
+        : missing === bars.length ? '未采集 · 该时段无成交价位归档'
+        : `完整 ${complete}/${bars.length} 根 · ${complete === bars.length ? '数据完整' : '缺失历史将回补，当前分钟仍在采集'}`;
+    coverageNode.title = coverageNode.textContent;
+    document.getElementById('dom-heading').textContent = STATE.isRunning
+        ? 'DOM (当前实时盘口)' : 'DOM (历史盘口未归档)';
+    domList.style.visibility = STATE.isRunning ? 'visible' : 'hidden';
+    if (!STATE.isRunning) STATE.profileNotification = null;
+}
+
+function renderAll() {
+    const w = canvasFPMain.width;
+    const h = canvasFPMain.height;
+    updateVisibleProfile();
+    
+    // --- 自动回中逻辑：防止图表运行中跑出屏幕 ---
+    if (STATE.isRunning && STATE.currentPrice > 0) {
+        const currentY = priceToY(STATE.currentPrice);
+        // 如果最新价格跑出了屏幕上下 15% 的范围，就自动平滑移动 Y 轴
+        if (currentY < h * 0.15 || currentY > h * 0.85) {
+            const targetOffsetY = (h / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+            // 每次移动差值的 10%（平滑滚动）
+            STATE.offsetY += (targetOffsetY - STATE.offsetY) * 0.1;
+        }
+    }
+    
+    // --- 动态加载历史数据逻辑 ---
+    if (STATE.footprints.length > 0 && !isLoadingMoreHistory) {
+        const oldestX = indexToX(0);
+        if (oldestX > -200) { // 当最左侧 K 线进入屏幕左侧 200px 范围内时触发加载
+            loadMoreHistory();
+        }
+    }
+    
+    // 清空主画布
+    ctxFP.clearRect(0, 0, w, h);
+    ctxUI.clearRect(0, 0, w, h);
+
+    // 1. 画价格轴 (右侧)
+    drawPriceAxis(ctxFP, w, h);
+
+    // 2. 画 Footprint K 线
+    drawFootprints(ctxFP, w, h);
+    
+    // 画时间轴 (底部)
+    drawTimeAxis(ctxFP, w, h);
+    
+    // 3. 画右侧面板的 Volume Profile (最强买卖单墙)
+    drawVolumeProfileWalls();
+    
+    // 如果鼠标在主图上悬停，同步在 VP 上画出对应价格的提示框
+    if (STATE.hovered && !STATE.hovered.inDelta) {
+        const hoverPriceRaw = yToPrice(STATE.hovered.y);
+        drawVPHoverByPrice(hoverPriceRaw);
+    }
+    
+    // 4. 画底部指标面板 (Delta 柱状图)
+    drawDeltaIndicator();
+
+    // 5. 画十字光标和当前价格线
+    drawUI(ctxUI, w, h);
+
+    // 6. 画测量标尺
+    drawRuler(ctxUI, w, h);
+}
+
+function drawPriceAxis(ctx, w, h) {
+    ctx.fillStyle = '#1e222d';
+    ctx.fillRect(w - 75, 0, 75, h);
+    ctx.strokeStyle = '#2a2e39';
+    ctx.beginPath(); ctx.moveTo(w - 75, 0); ctx.lineTo(w - 75, h); ctx.stroke();
+
+    ctx.fillStyle = '#787b86';
+    ctx.font = '11px Consolas';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    // 确定可见的价格范围
+    const maxPrice = yToPrice(0);
+    const minPrice = yToPrice(h);
+    
+    // 每 10 档画一个刻度
+    const step = CONFIG.tickSize * 10;
+    let p = Math.ceil(minPrice / step) * step;
+    
+    while (p <= maxPrice) {
+        const y = priceToY(p);
+        ctx.fillText(p.toFixed(1), w - 65, y); // 往左移动
+        
+        // 画浅色网格线
+        ctx.strokeStyle = 'rgba(42, 46, 57, 0.5)';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w - 75, y); ctx.stroke();
+        
+        p += step;
+    }
+}
+
+function drawTimeAxis(ctx, w, h) {
+    const cw = CONFIG.candleWidth * STATE.scaleX;
+    if (STATE.footprints.length === 0) return;
+
+    ctx.fillStyle = '#1e222d';
+    ctx.fillRect(0, h - 20, w - 75, 20); // 底部留 20px 黑色背景条
+    
+    ctx.strokeStyle = '#2a2e39';
+    ctx.beginPath(); ctx.moveTo(0, h - 20); ctx.lineTo(w - 75, h - 20); ctx.stroke();
+
+    ctx.fillStyle = '#787b86';
+    ctx.font = '10px Consolas';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 决定间隔，避免文字重叠
+    const minPixelSpacing = 80; 
+    const stepCount = Math.ceil(minPixelSpacing / cw);
+    
+    for (let i = 0; i < STATE.footprints.length; i += stepCount) {
+        const cx = indexToX(i);
+        if (cx < -cw || cx > w - 75) continue; // 超出可视范围
+        
+        const timestamp = STATE.footprints[i].startTime;
+        // 强制转换为东八区时间 (UTC+8)
+        const d = new Date(timestamp + 8 * 3600 * 1000);
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const HH = String(d.getUTCHours()).padStart(2, '0');
+        const min = String(d.getUTCMinutes()).padStart(2, '0');
+        
+        const timeStr = `${mm}-${dd} ${HH}:${min}`;
+        
+        ctx.fillText(timeStr, cx, h - 10);
+        
+        // 竖向短虚线，指示刻度对齐
+        ctx.strokeStyle = 'rgba(42, 46, 57, 0.5)';
+        ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h - 20); ctx.stroke();
+    }
+}
+
+function drawFootprints(ctx, w, h) {
+    const cw = CONFIG.candleWidth * STATE.scaleX;
+    const rh = CONFIG.rowHeight * STATE.scaleY;
+    
+    // 找出当前周期全局最强成交密集区 (以前叫单墙，现正名为 vPOC)
+    // 为了防止当前价格在支撑/阻力位附近频繁波动导致标识闪烁跳跃，引入缓冲带 (Hysteresis) 机制
+    let maxBuyVol = 0; let strongestBuyPrice = 0;
+    let maxSellVol = 0; let strongestSellPrice = 0;
+    
+    const currentP = STATE.profileRange?.price ?? STATE.currentPrice;
+    const buffer = CONFIG.tickSize * 2; // 缓冲带：2个 tick
+    
+    STATE.globalVolumeProfile.forEach((vData, pLevel) => {
+        // 买方vPOC：必须在当前价格之下 (不加向上的缓冲带，避免跑到现价上方)
+        // 允许等于当前价格
+        if (pLevel <= currentP && vData.buy > maxBuyVol) { 
+            maxBuyVol = vData.buy; 
+            strongestBuyPrice = pLevel; 
+        }
+        // 卖方vPOC：必须在当前价格之上 (不加向下的缓冲带，避免跑到现价下方)
+        // 允许等于当前价格
+        if (pLevel >= currentP && vData.sell > maxSellVol) { 
+            maxSellVol = vData.sell; 
+            strongestSellPrice = pLevel; 
+        }
+    });
+
+    // 记录标签的点击区域，用于鼠标事件
+    STATE.wallLabels = [];
+
+    // 在主图表上画出最强买卖vPOC的射线和价格标签
+    if (strongestBuyPrice > 0) {
+        const by = priceToY(strongestBuyPrice) + rh/2;
+        
+        // 确保即使由于边界判断导致 y 坐标计算有点误差，只要存在墙，就画出它的射线（放宽限制）
+        if (by > -h * 2 && by < h * 3) {
+            ctx.strokeStyle = '#26a69a';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(0, by); ctx.lineTo(w - 75, by); ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        
+        // 确保标签始终在视图内可见 (限制在 12 ~ h - 12 之间)
+        // 注意：如果是处于视野极上方(by<0)，需要避免和卖单墙重叠；在极下方同理。
+        let labelY = Math.max(12, Math.min(h - 12, by));
+        
+        // 画标签背景和文字
+        ctx.fillStyle = '#26a69a';
+        ctx.fillRect(w - 280, labelY - 12, 140, 24); // 进一步往左移，防止和 K 线、最新价格重叠
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Consolas';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // 显示周期和价格
+        const tfLabel = document.querySelector('.btn-group .btn.active[data-tf]').innerText;
+        ctx.fillText(`${tfLabel}买方vPOC ${strongestBuyPrice.toFixed(1)}`, w - 210, labelY);
+        
+        // 如果墙在视野外，画个小箭头指示方向，并调整箭头位置
+        if (by < 0) ctx.fillText('▲', w - 270, labelY);
+        if (by > h) ctx.fillText('▼', w - 270, labelY);
+        
+        STATE.wallLabels.push({
+            x: w - 280, y: labelY - 12, width: 140, height: 24,
+            targetPrice: strongestBuyPrice
+        });
+    }
+    
+    if (strongestSellPrice > 0) {
+        const sy = priceToY(strongestSellPrice) + rh/2;
+        
+        if (sy > -h * 2 && sy < h * 3) {
+            ctx.strokeStyle = '#ef5350';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w - 75, sy); ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        
+        let labelY = Math.max(12, Math.min(h - 12, sy));
+        
+        // 如果买卖墙都在上方或下方极值处挤压，给卖单墙一点偏移避免重叠
+        if (strongestBuyPrice > 0) {
+            const by = priceToY(strongestBuyPrice) + rh/2;
+            if (by < 0 && sy < 0) labelY += 26; // 都在上方，卖单墙往下挪
+            if (by > h && sy > h) labelY -= 26; // 都在下方，卖单墙往上挪
+        }
+        
+        // 画标签背景和文字
+        ctx.fillStyle = '#ef5350';
+        ctx.fillRect(w - 280, labelY - 12, 140, 24); // 往左移动
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Consolas';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const tfLabel = document.querySelector('.btn-group .btn.active[data-tf]').innerText;
+        ctx.fillText(`${tfLabel}卖方vPOC ${strongestSellPrice.toFixed(1)}`, w - 210, labelY);
+        
+        // 如果墙在视野外，画个小箭头指示方向，并调整箭头位置
+        if (sy < 0) ctx.fillText('▲', w - 270, labelY);
+        if (sy > h) ctx.fillText('▼', w - 270, labelY);
+        
+        STATE.wallLabels.push({
+            x: w - 280, y: labelY - 12, width: 140, height: 24,
+            targetPrice: strongestSellPrice
+        });
+    }
+
+    // 存储当前周期的最强vPOC到后端 (原称单墙)
+    const tfLabel = document.querySelector('.btn-group .btn.active[data-tf]').innerText;
+    if (STATE.isRunning && STATE.archiveAvailable && (strongestBuyPrice > 0 || strongestSellPrice > 0)) {
+        // 使用防抖避免每帧都发送请求
+        if (!STATE._lastWallUpdate || Date.now() - STATE._lastWallUpdate > 5000) {
+            STATE._lastWallUpdate = Date.now();
+            fetch('/api/mtf_walls', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tf: tfLabel,
+                    buy: strongestBuyPrice,
+                    sell: strongestSellPrice
+                })
+            }).catch(e => console.warn("Backend wall sync failed:", e));
+        }
+    }
+
+    // 读取并绘制其他周期的最强vPOC (多周期共振对比)
+    if (STATE.isRunning && STATE.mtfWallsData) {
+        Object.keys(STATE.mtfWallsData).forEach(tf => {
+            if (tf === tfLabel) return; // 跳过当前周期
+            
+            const data = STATE.mtfWallsData[tf];
+            if (Date.now() - data.ts > 24 * 60 * 60 * 1000) return; // 超过24小时的数据过期
+            
+            ctx.font = '10px Consolas';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            
+            // 绘制买方vPOC (共振)
+            if (data.buy > 0) {
+                const by = priceToY(data.buy) + rh/2;
+                if (by > 0 && by < h) {
+                    ctx.strokeStyle = 'rgba(38, 166, 154, 0.3)';
+                    ctx.setLineDash([2, 2]);
+                    ctx.beginPath(); ctx.moveTo(0, by); ctx.lineTo(w - 75, by); ctx.stroke();
+                    ctx.setLineDash([]);
+                    
+                    ctx.fillStyle = 'rgba(38, 166, 154, 0.7)';
+                    ctx.fillRect(5, by - 8, 55, 16);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(`${tf}买vPOC`, 10, by);
+                }
+            }
+            
+            // 绘制卖方vPOC (共振)
+            if (data.sell > 0) {
+                const sy = priceToY(data.sell) + rh/2;
+                if (sy > 0 && sy < h) {
+                    ctx.strokeStyle = 'rgba(239, 83, 80, 0.3)';
+                    ctx.setLineDash([2, 2]);
+                    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w - 75, sy); ctx.stroke();
+                    ctx.setLineDash([]);
+                    
+                    ctx.fillStyle = 'rgba(239, 83, 80, 0.7)';
+                    ctx.fillRect(5, sy - 8, 55, 16);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(`${tf}卖vPOC`, 10, sy);
+                }
+            }
+        });
+    }
+
+    // 只画可视区域内的 K 线
+    for (let i = 0; i < STATE.footprints.length; i++) {
+        const bar = STATE.footprints[i];
+        const cx = indexToX(i);
+        
+        // 如果超出版面，跳过渲染
+        if (cx < -cw || cx > w) continue;
+
+        const isBull = bar.close >= bar.open;
+        const wickColor = isBull ? '#26a69a' : '#ef5350';
+
+        // 1. 画上下影线
+        const yHigh = priceToY(bar.high);
+        const yLow = priceToY(bar.low) + rh; // 加上格子高度
+        
+        ctx.strokeStyle = wickColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, yHigh);
+        ctx.lineTo(cx, yLow);
+        ctx.stroke();
+
+        // 2. 画实体背景框
+        const yOpen = priceToY(bar.open);
+        const yClose = priceToY(bar.close);
+        const bodyTop = Math.min(yOpen, yClose);
+        const bodyBottom = Math.max(yOpen, yClose) + rh;
+        
+        if (cw < 10) {
+            // 宏观 K 线模式 (缩小状态)：只画实心柱体，并确保居中
+            const bodyW = Math.max(1, cw * 0.8);
+            ctx.fillStyle = isBull ? '#26a69a' : '#ef5350';
+            ctx.fillRect(cx - bodyW / 2, bodyTop, bodyW, Math.max(1, bodyBottom - bodyTop));
+        } else {
+            // 订单流微观模式：画透明边框
+            ctx.fillStyle = isBull ? 'rgba(38, 166, 154, 0.08)' : 'rgba(239, 83, 80, 0.08)';
+            ctx.fillRect(cx - cw/2 + 2, bodyTop, cw - 4, Math.max(1, bodyBottom - bodyTop));
+            ctx.strokeStyle = wickColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cx - cw/2 + 2, bodyTop, cw - 4, bodyBottom - bodyTop);
+        }
+
+        // 3. 画每个格子的买卖量 (只有在放大到一定程度时才渲染数字和单元格边框)
+        const showCells = (rh >= 6 && cw >= 20);
+        
+        if (showCells) {
+            ctx.font = `${Math.max(9, 11 * STATE.scaleY)}px Consolas`;
+            ctx.textBaseline = 'middle';
+            
+            const pocLvl = bar.pocLevel;
+
+            bar.cells.forEach((cell, lvl) => {
+                const y = priceToY(lvl);
+                // 过滤不可见的格子
+                if (y < 0 || y > h) return;
+
+                // POC 边框
+                if (lvl === pocLvl) {
+                    ctx.fillStyle = 'rgba(255, 202, 40, 0.3)';
+                    ctx.fillRect(cx - cw/2 + 4, y, cw - 8, rh - 1);
+                    ctx.strokeStyle = '#ffca28';
+                    ctx.setLineDash([2, 2]);
+                    ctx.strokeRect(cx - cw/2 + 4, y, cw - 8, rh - 1);
+                    ctx.setLineDash([]);
+                }
+
+                const cy = y + rh / 2;
+
+                const mode = STATE.fpMode || 'bidask';
+
+                if (mode === 'bidask') {
+                    // 卖单 (Ask) - 画在左边
+                    if (cell.sellVol > 0) {
+                        ctx.fillStyle = cell.sellImbalance ? '#ef5350' : '#ffcdd2';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(cell.sellVol.toFixed(1), cx - 5, cy);
+                    }
+
+                    // 买单 (Bid) - 画在右边
+                    if (cell.buyVol > 0) {
+                        ctx.fillStyle = cell.buyImbalance ? '#26a69a' : '#b2dfdb';
+                        ctx.textAlign = 'left';
+                        ctx.fillText(cell.buyVol.toFixed(1), cx + 5, cy);
+                    }
+                    
+                    // 中间分隔线
+                    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                    ctx.fillRect(cx - 1, y + 2, 2, rh - 4);
+                } else if (mode === 'volume') {
+                    const total = cell.buyVol + cell.sellVol;
+                    if (total > 0) {
+                        if (cell.buyVol > cell.sellVol * 1.5) ctx.fillStyle = '#26a69a';
+                        else if (cell.sellVol > cell.buyVol * 1.5) ctx.fillStyle = '#ef5350';
+                        else ctx.fillStyle = '#d1d4dc';
+                        
+                        ctx.textAlign = 'center';
+                        ctx.fillText(total.toFixed(1), cx, cy);
+                    }
+                } else if (mode === 'delta') {
+                    const delta = cell.buyVol - cell.sellVol;
+                    if (delta !== 0) {
+                        ctx.fillStyle = delta > 0 ? '#26a69a' : '#ef5350';
+                        ctx.textAlign = 'center';
+                        ctx.fillText((delta > 0 ? '+' : '') + delta.toFixed(1), cx, cy);
+                    }
+                } else if (mode === 'volumedelta') {
+                    const total = cell.buyVol + cell.sellVol;
+                    const delta = cell.buyVol - cell.sellVol;
+                    
+                    if (total > 0) {
+                        ctx.fillStyle = '#d1d4dc';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(total.toFixed(1), cx - 5, cy);
+                    }
+
+                    if (delta !== 0) {
+                        ctx.fillStyle = delta > 0 ? '#26a69a' : '#ef5350';
+                        ctx.textAlign = 'left';
+                        ctx.fillText((delta > 0 ? '+' : '') + delta.toFixed(1), cx + 5, cy);
+                    }
+                    
+                    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                    ctx.fillRect(cx - 1, y + 2, 2, rh - 4);
+                }
+            });
+        }
+
+        // 4. 画 Delta 和 Total Vol (在 K 线底部)
+        if (cw >= 20) {
+            ctx.textAlign = 'center';
+            const dY = yLow + 15;
+            const delta = bar.totalDelta;
+            ctx.fillStyle = delta > 0 ? '#26a69a' : '#ef5350';
+            ctx.fillText(`Δ: ${delta > 0 ? '+' : ''}${delta.toFixed(0)}`, cx, dY);
+        }
+    }
+}
+
+// 绘制底部面板的 Bar Delta (柱状图) 与 CVD (累积量差折线)
+function drawDeltaIndicator() {
+    const w = canvasDelta.width;
+    const h = canvasDelta.height;
+    
+    ctxDelta.clearRect(0, 0, w, h);
+    
+    if (STATE.footprints.length === 0) return;
+
+    // 计算 CVD 和极值
+    let cumulativeDelta = 0;
+    const cvdValues = [];
+    let maxDeltaAbs = 0;
+    let maxCVD = -Infinity;
+    let minCVD = Infinity;
+
+    for (let i = 0; i < STATE.footprints.length; i++) {
+        const d = STATE.footprints[i].totalDelta;
+        cumulativeDelta += d;
+        cvdValues.push(cumulativeDelta);
+        
+        if (Math.abs(d) > maxDeltaAbs) maxDeltaAbs = Math.abs(d);
+        if (cumulativeDelta > maxCVD) maxCVD = cumulativeDelta;
+        if (cumulativeDelta < minCVD) minCVD = cumulativeDelta;
+    }
+    
+    if (maxDeltaAbs === 0) maxDeltaAbs = 1; // 防止除零
+    const cvdRange = Math.max(Math.abs(maxCVD), Math.abs(minCVD), 1);
+
+    const cw = CONFIG.candleWidth * STATE.scaleX;
+    const midY = h / 2;
+
+    // 画零轴
+    ctxDelta.strokeStyle = '#2a2e39';
+    ctxDelta.beginPath(); ctxDelta.moveTo(0, midY); ctxDelta.lineTo(w, midY); ctxDelta.stroke();
+
+    // 只画可视区域内的 K 线的 Delta 柱子
+    for (let i = 0; i < STATE.footprints.length; i++) {
+        const cx = indexToX(i);
+        if (cx < -cw || cx > w + cw) continue;
+
+        const delta = STATE.footprints[i].totalDelta;
+        // 柱子的高度比例 (占上下半区的百分比)
+        const barH = (Math.abs(delta) / maxDeltaAbs) * (midY * 0.85);
+        
+        ctxDelta.fillStyle = delta > 0 ? 'rgba(38, 166, 154, 0.7)' : 'rgba(239, 83, 80, 0.7)';
+        
+        const barW = cw * 0.6; // 柱子宽度稍微比 K 线窄一点
+        if (delta > 0) {
+            ctxDelta.fillRect(cx - barW/2, midY - barH, barW, barH);
+        } else {
+            ctxDelta.fillRect(cx - barW/2, midY, barW, barH);
+        }
+    }
+
+    // 画 CVD 折线 (金色)
+    ctxDelta.beginPath();
+    ctxDelta.strokeStyle = '#ffca28';
+    ctxDelta.lineWidth = 2;
+    
+    let isFirst = true;
+    for (let i = 0; i < STATE.footprints.length; i++) {
+        const cx = indexToX(i);
+        if (cx < -cw || cx > w + cw) continue;
+
+        const cvd = cvdValues[i];
+        // 映射 CVD 到 Y 轴，0 对应 midY
+        const cvdY = midY - (cvd / cvdRange) * (midY * 0.85);
+        
+        if (isFirst) {
+            ctxDelta.moveTo(cx, cvdY);
+            isFirst = false;
+        } else {
+            ctxDelta.lineTo(cx, cvdY);
+        }
+    }
+    ctxDelta.stroke();
+
+    // 右侧遮罩 (和主图的刻度轴对齐)
+    ctxDelta.fillStyle = '#1e222d';
+    ctxDelta.fillRect(w - 75, 0, 75, h);
+    ctxDelta.strokeStyle = '#2a2e39';
+    ctxDelta.beginPath(); ctxDelta.moveTo(w - 75, 0); ctxDelta.lineTo(w - 75, h); ctxDelta.stroke();
+
+    // 在右侧刻度轴显示最新数值
+    if (cvdValues.length > 0) {
+        const lastDelta = STATE.footprints[STATE.footprints.length - 1].totalDelta;
+        const lastCVD = cvdValues[cvdValues.length - 1];
+
+        ctxDelta.font = 'bold 11px Consolas';
+        ctxDelta.textAlign = 'center';
+        
+        // 显示 Delta
+        ctxDelta.fillStyle = lastDelta > 0 ? '#26a69a' : '#ef5350';
+        ctxDelta.fillText(`Δ`, w - 30, h / 2 - 25);
+        ctxDelta.fillText(`${lastDelta > 0 ? '+' : ''}${lastDelta.toFixed(0)}`, w - 30, h / 2 - 10);
+        
+        // 显示 CVD
+        ctxDelta.fillStyle = '#ffca28';
+        ctxDelta.fillText(`CVD`, w - 30, h / 2 + 10);
+        ctxDelta.fillText(`${lastCVD > 0 ? '+' : ''}${lastCVD.toFixed(0)}`, w - 30, h / 2 + 25);
+    }
+
+    // 绘制鼠标十字光标
+    if (STATE.hovered) {
+        const hx = STATE.hovered.x;
+        
+        ctxDelta.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctxDelta.beginPath();
+        ctxDelta.moveTo(hx, 0); ctxDelta.lineTo(hx, h);
+        
+        if (STATE.hovered.inDelta) {
+            const hy = STATE.hovered.y;
+            ctxDelta.moveTo(0, hy); ctxDelta.lineTo(w - 75, hy);
+        }
+        ctxDelta.stroke();
+    }
+}
+
+// 绘制右侧面板的 Volume Profile
+function drawVolumeProfileWalls() {
+    const w = canvasVP.width;
+    const h = canvasVP.height;
+    
+    ctxVP.clearRect(0, 0, w, h);
+    
+    if (STATE.globalVolumeProfile.size === 0) {
+        STATE.profileNotification = null;
+        return;
+    }
+
+    // 获取主图可视范围的价格区间
+    const viewMaxP = yToPrice(0);
+    const viewMinP = yToPrice(canvasFPMain.height);
+    const priceRange = viewMaxP - viewMinP;
+    
+    if (priceRange <= 0) return;
+
+    // 1. 提取所有价格档位并计算 vPOC, VAH, VAL
+    let totalVol = 0;
+    let vpocLevel = null;
+    let maxVolOverall = -1;
+    const allLevels = [];
+    
+    STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
+        const pLevel = parseFloat(pLevelStr);
+        totalVol += vData.total;
+        allLevels.push({ price: pLevel, vol: vData.total });
+        if (vData.total > maxVolOverall) {
+            maxVolOverall = vData.total;
+            vpocLevel = pLevel;
+        }
+    });
+
+    let vah = vpocLevel;
+    let val = vpocLevel;
+
+    if (allLevels.length > 0 && vpocLevel !== null) {
+        allLevels.sort((a, b) => a.price - b.price);
+        const targetVol = totalVol * 0.70;
+        let currentVol = maxVolOverall;
+        
+        let vpocIdx = allLevels.findIndex(l => l.price === vpocLevel);
+        let upperIdx = vpocIdx;
+        let lowerIdx = vpocIdx;
+        
+        while (currentVol < targetVol) {
+            let upperVol = 0;
+            let lowerVol = 0;
+            
+            let u1 = upperIdx + 1 < allLevels.length ? allLevels[upperIdx + 1].vol : 0;
+            let u2 = upperIdx + 2 < allLevels.length ? allLevels[upperIdx + 2].vol : 0;
+            upperVol = u1 + u2;
+            
+            let l1 = lowerIdx - 1 >= 0 ? allLevels[lowerIdx - 1].vol : 0;
+            let l2 = lowerIdx - 2 >= 0 ? allLevels[lowerIdx - 2].vol : 0;
+            lowerVol = l1 + l2;
+            
+            if (upperVol === 0 && lowerVol === 0) break;
+            
+            if (upperVol >= lowerVol) {
+                if (upperIdx + 1 < allLevels.length) {
+                    currentVol += allLevels[upperIdx + 1].vol;
+                    upperIdx++;
+                }
+                if (upperIdx + 1 < allLevels.length && currentVol < targetVol) {
+                    currentVol += allLevels[upperIdx + 1].vol;
+                    upperIdx++;
+                }
+            } else {
+                if (lowerIdx - 1 >= 0) {
+                    currentVol += allLevels[lowerIdx - 1].vol;
+                    lowerIdx--;
+                }
+                if (lowerIdx - 1 >= 0 && currentVol < targetVol) {
+                    currentVol += allLevels[lowerIdx - 1].vol;
+                    lowerIdx--;
+                }
+            }
+        }
+        vah = allLevels[upperIdx].price;
+        val = allLevels[lowerIdx].price;
+    }
+
+    // 2. 找到在可视范围内的最大总成交量，用于归一化宽度
+    let maxTotalVol = 0;
+    STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
+        const pLevel = parseFloat(pLevelStr);
+        // 稍微放宽一点边界
+        if (pLevel >= viewMinP - CONFIG.tickSize && pLevel <= viewMaxP + CONFIG.tickSize) {
+            if (vData.total > maxTotalVol) maxTotalVol = vData.total;
+        }
+    });
+
+    if (maxTotalVol === 0) maxTotalVol = 1; // 防止除零
+    
+    // 3. 绘制柱状图
+    STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
+        const pLevel = parseFloat(pLevelStr);
+        // 只绘制在主图可视范围内的筹码，避免因历史极值把图形压缩成一条线
+        if (pLevel < viewMinP - CONFIG.tickSize || pLevel > viewMaxP + CONFIG.tickSize) return;
+
+        // 判断是否在 Value Area 内
+        const inVA = pLevel >= val && pLevel <= vah;
+        const alpha = inVA ? 0.8 : 0.3; // VA内的柱子更亮，外面的变暗
+
+        // 计算在这个小画布中的 Y 坐标 (动态映射到可视区间)
+        const mappedY = h - ((pLevel - viewMinP) / priceRange) * h;
+        // 动态计算每一层的高度，至少保证有 2 像素高度，不会糊在一起
+        const barHeight = Math.max(2, (CONFIG.tickSize / priceRange) * h);
+        
+        // 画买单柱子 (绿色，靠左)
+        const buyWidth = (vData.buy / maxTotalVol) * w;
+        ctxVP.fillStyle = `rgba(38, 166, 154, ${alpha})`;
+        ctxVP.fillRect(0, mappedY - barHeight, buyWidth, barHeight - 0.5); // 留0.5px的缝隙
+        
+        // 画卖单柱子 (红色，紧挨着买单画)
+        const sellWidth = (vData.sell / maxTotalVol) * w;
+        ctxVP.fillStyle = `rgba(239, 83, 80, ${alpha})`;
+        ctxVP.fillRect(buyWidth, mappedY - barHeight, sellWidth, barHeight - 0.5);
+    });
+
+    // 4. 绘制 vPOC, VAH, VAL 线和标签
+    ctxVP.font = '10px Arial';
+    ctxVP.textAlign = 'right';
+    ctxVP.textBaseline = 'middle';
+
+    const drawLevelLine = (price, color, label) => {
+        if (price < viewMinP || price > viewMaxP) return; // 不在可视范围内则不画
+        const y = h - ((price - viewMinP) / priceRange) * h - ((CONFIG.tickSize / priceRange) * h) / 2;
+        
+        ctxVP.strokeStyle = color;
+        ctxVP.lineWidth = 1;
+        ctxVP.setLineDash([2, 2]);
+        ctxVP.beginPath();
+        ctxVP.moveTo(0, y);
+        ctxVP.lineTo(w, y);
+        ctxVP.stroke();
+        ctxVP.setLineDash([]);
+        
+        // 背景框
+        const textWidth = ctxVP.measureText(label).width;
+        ctxVP.fillStyle = 'rgba(19, 23, 34, 0.8)';
+        ctxVP.fillRect(w - textWidth - 6, y - 8, textWidth + 6, 16);
+        
+        // 文本
+        ctxVP.fillStyle = color;
+        ctxVP.fillText(label, w - 2, y);
+    };
+
+    if (vah !== null) drawLevelLine(vah, '#2962ff', 'VAH'); // 蓝色 VAH
+    if (val !== null) drawLevelLine(val, '#2962ff', 'VAL'); // 蓝色 VAL
+    if (vpocLevel !== null) drawLevelLine(vpocLevel, '#ffca28', 'vPOC'); // 黄色 vPOC
+    
+    // Notify only market changes within an unchanged live time range.
+    if (vah !== null && val !== null && vpocLevel !== null) {
+        const tf = document.querySelector('.btn-group .btn.active[data-tf]').innerText;
+        const range = `${tf}:${STATE.profileRange?.start}:${STATE.profileRange?.end}`;
+        STATE.profileNotification = OrderFlowProfile.notification(
+            STATE.profileNotification, range, `${vpocLevel}:${vah}:${val}`,
+            STATE.isRunning && STATE.archiveAvailable);
+        if (STATE.profileNotification.send) {
+            fetch('/api/auto-trade/notify-profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tf, vpoc: vpocLevel, vah, val, symbol: currentSymbol })
+            }).catch(e => console.warn("Failed to send profile alert:", e));
+        }
+    }
+}
+
+function drawRuler(ctx, w, h) {
+    if (!STATE.rulerMode || !STATE.rulerStart || !STATE.rulerCurrent) return;
+
+    const startX = indexToX(STATE.rulerStart.index);
+    const startY = priceToY(STATE.rulerStart.price);
+    const currX = indexToX(STATE.rulerCurrent.index);
+    const currY = priceToY(STATE.rulerCurrent.price);
+
+    // 绘制半透明背景区域
+    ctx.fillStyle = 'rgba(41, 98, 255, 0.2)';
+    ctx.fillRect(startX, startY, currX - startX, currY - startY);
+
+    // 绘制边框
+    ctx.strokeStyle = '#2962ff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(startX, startY, currX - startX, currY - startY);
+
+    // 绘制起点到终点的虚线
+    ctx.beginPath();
+    ctx.setLineDash([5, 5]);
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(currX, currY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 计算差值
+    const priceDiff = STATE.rulerCurrent.price - STATE.rulerStart.price;
+    const percentDiff = (priceDiff / STATE.rulerStart.price) * 100;
+    const ticks = Math.round(priceDiff / CONFIG.tickSize);
+    
+    // index 差值
+    const barsDiff = Math.abs(STATE.rulerCurrent.index - STATE.rulerStart.index);
+    
+    // 信息框
+    const text1 = `${priceDiff > 0 ? '+' : ''}${priceDiff.toFixed(1)} (${percentDiff > 0 ? '+' : ''}${percentDiff.toFixed(2)}%)`;
+    const text2 = `${barsDiff} 根 K 线, ${Math.abs(ticks)} Ticks`;
+
+    ctx.font = '12px Arial';
+    const textWidth = Math.max(ctx.measureText(text1).width, ctx.measureText(text2).width) + 20;
+    const boxHeight = 44;
+    
+    // 决定信息框位置 (放在终点附近)
+    let boxX = currX + 10;
+    let boxY = currY + 10;
+    if (boxX + textWidth > w) boxX = currX - textWidth - 10;
+    if (boxY + boxHeight > h) boxY = currY - boxHeight - 10;
+
+    // 画信息框背景
+    ctx.fillStyle = 'rgba(41, 98, 255, 0.9)';
+    ctx.fillRect(boxX, boxY, textWidth, boxHeight);
+    
+    // 画文字
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text1, boxX + textWidth / 2, boxY + 14);
+    ctx.fillText(text2, boxX + textWidth / 2, boxY + 30);
+}
+
+function drawUI(ctx, w, h) {
+    // 画当前价格线
+    const cy = priceToY(STATE.currentPrice);
+    
+    ctx.strokeStyle = '#ff9800';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, cy + CONFIG.rowHeight/2);
+    ctx.lineTo(w - 75, cy + CONFIG.rowHeight/2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 价格轴上的高亮标签
+    ctx.fillStyle = '#ff9800';
+    ctx.fillRect(w - 75, cy, 75, CONFIG.rowHeight); // 略微加宽右侧标签，并往左移一点，避免被边缘吞掉
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Consolas';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(STATE.currentPrice.toFixed(1), w - 37, cy + CONFIG.rowHeight/2);
+
+    // 绘制鼠标十字光标
+    if (STATE.hovered) {
+        const hx = STATE.hovered.x;
+        
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath();
+        ctx.moveTo(hx, 0); ctx.lineTo(hx, h);
+        
+        if (!STATE.hovered.inDelta) {
+            const hy = STATE.hovered.y;
+            ctx.moveTo(0, hy); ctx.lineTo(w - 75, hy);
+        }
+        ctx.stroke();
+    }
+}
+
+// 绘制 Volume Profile 上的悬浮提示 (通过价格联动)
+function drawVPHoverByPrice(hoverPriceRaw) {
+    const w = canvasVP.width;
+    const h = canvasVP.height;
+    
+    const viewMaxP = yToPrice(0);
+    const viewMinP = yToPrice(canvasFPMain.height);
+    const priceRange = viewMaxP - viewMinP;
+    
+    // 将价格映射回 VP 的局部 Y 坐标
+    const y = h - ((hoverPriceRaw - viewMinP) / priceRange) * h;
+    
+    if (y < 0 || y > h) return;
+
+    const pLevel = Math.floor(hoverPriceRaw / CONFIG.tickSize) * CONFIG.tickSize;
+    const vData = STATE.globalVolumeProfile.get(pLevel) || { buy: 0, sell: 0, total: 0 };
+    
+    // 画水平提示线
+    ctxVP.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctxVP.setLineDash([2, 2]);
+    ctxVP.beginPath();
+    ctxVP.moveTo(0, y);
+    ctxVP.lineTo(w, y);
+    ctxVP.stroke();
+    ctxVP.setLineDash([]);
+    
+    // 准备提示文字
+    const pText = `P: ${pLevel.toFixed(1)}`;
+    const vText = `V: ${vData.total.toFixed(2)}`;
+    
+    ctxVP.font = '10px Consolas';
+    const pWidth = ctxVP.measureText(pText).width;
+    const vWidth = ctxVP.measureText(vText).width;
+    const boxW = Math.max(pWidth, vWidth) + 10;
+    const boxH = 28;
+    
+    // 确保提示框不会超出边界
+    let boxX = w / 2 - boxW / 2;
+    let boxY = y - boxH - 5;
+    if (boxY < 0) boxY = y + 5;
+    
+    // 画背景框
+    ctxVP.fillStyle = 'rgba(19, 23, 34, 0.9)';
+    ctxVP.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctxVP.fillRect(boxX, boxY, boxW, boxH);
+    ctxVP.strokeRect(boxX, boxY, boxW, boxH);
+    
+    // 画文字
+    ctxVP.fillStyle = '#ffffff';
+    ctxVP.textAlign = 'center';
+    ctxVP.textBaseline = 'top';
+    ctxVP.fillText(pText, boxX + boxW/2, boxY + 4);
+    ctxVP.fillStyle = '#787b86';
+    ctxVP.fillText(vText, boxX + boxW/2, boxY + 16);
+}
+
+// ================= 交互事件控制 (拖拽、缩放、悬停) =================
+
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+window.addEventListener('mouseup', () => isDragging = false);
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && STATE.rulerMode) {
+        STATE.rulerMode = false;
+        document.getElementById('btn-ruler').classList.remove('active');
+        STATE.rulerStart = null;
+        STATE.rulerCurrent = null;
+        fpContainer.style.cursor = 'default';
+        renderAll();
+    }
+});
+
+function bindChartEvents(container, isDelta) {
+    container.addEventListener('mousedown', e => {
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (!isDelta && STATE.wallLabels && STATE.wallLabels.length > 0) {
+            for (let label of STATE.wallLabels) {
+                if (x >= label.x && x <= label.x + label.width &&
+                    y >= label.y && y <= label.y + label.height) {
+                    const rectHeight = fpContainer.getBoundingClientRect().height;
+                    STATE.offsetY = (rectHeight / 2) - (label.targetPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+                    
+                    STATE.isRunning = false;
+                    document.getElementById('btn-play').classList.remove('active');
+                    document.getElementById('btn-pause').classList.add('active');
+                    document.getElementById('conn-status').textContent = '回放/浏览模式';
+                    document.getElementById('conn-dot').style.backgroundColor = '#ff9800';
+                    
+                    renderAll();
+                    return;
+                }
+            }
+        }
+
+        if (!isDelta && STATE.rulerMode) {
+            STATE.rulerStart = { x, y, price: yToPrice(y), index: xToIndex(x) };
+            STATE.rulerCurrent = { x, y, price: yToPrice(y), index: xToIndex(x) };
+            renderAll();
+            return;
+        }
+
+        isDragging = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+    });
+
+    container.addEventListener('mousemove', e => {
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (!isDelta && STATE.rulerMode && STATE.rulerStart && (e.buttons === 1)) {
+            STATE.rulerCurrent = { x, y, price: yToPrice(y), index: xToIndex(x) };
+            renderAll();
+            return;
+        }
+
+        if (isDragging && !STATE.rulerMode) {
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            
+            STATE.offsetX += dx;
+            if (!isDelta) {
+                STATE.offsetY -= dy / STATE.scaleY; 
+            }
+            
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            
+            STATE.isRunning = false;
+            document.getElementById('btn-play').classList.remove('active');
+            document.getElementById('btn-pause').classList.add('active');
+            document.getElementById('conn-status').textContent = '回放/浏览模式';
+            document.getElementById('conn-dot').style.backgroundColor = '#ff9800';
+            
+            renderAll();
+        } else {
+            STATE.hovered = { x, y, inDelta: isDelta };
+            updateTooltip(e, x, y, isDelta);
+            renderAll();
+        }
+    });
+
+    container.addEventListener('mouseleave', () => {
+        STATE.hovered = null;
+        tooltip.style.display = 'none';
+        renderAll();
+    });
+
+    container.addEventListener('dblclick', () => {
+        STATE.scaleX = 1.0;
+        STATE.scaleY = 1.0;
+        const rect = fpContainer.getBoundingClientRect();
+        STATE.offsetY = (rect.height / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+        STATE.offsetX = 0;
+        
+        const wasRunning = STATE.isRunning;
+        STATE.isRunning = true;
+        document.getElementById('btn-play').classList.add('active');
+        document.getElementById('btn-pause').classList.remove('active');
+        document.getElementById('conn-status').textContent = '实时数据同步中...';
+        document.getElementById('conn-dot').style.backgroundColor = 'var(--buy-color)';
+        
+        if (!wasRunning) {
+            loadHistoricalAndConnect();
+            requestAnimationFrame(renderLoop);
+        } else {
+            renderAll();
+        }
+    });
+
+    container.addEventListener('wheel', e => {
+        e.preventDefault();
+        STATE.isRunning = false;
+        STATE.profileNotification = null;
+        document.getElementById('btn-play').classList.remove('active');
+        document.getElementById('btn-pause').classList.add('active');
+        document.getElementById('conn-status').textContent = '回放/浏览模式';
+        
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const oldScaleX = STATE.scaleX;
+        const oldScaleY = STATE.scaleY;
+        
+        const zoomFactor = 0.1;
+        if (e.deltaY < 0) {
+            STATE.scaleX = Math.min(10.0, STATE.scaleX + zoomFactor);
+            STATE.scaleY = Math.min(10.0, STATE.scaleY + zoomFactor);
+        } else {
+            // 允许缩放到极小，以便看清宏观 K 线
+            STATE.scaleX = Math.max(0.05, STATE.scaleX - zoomFactor);
+            STATE.scaleY = Math.max(0.05, STATE.scaleY - zoomFactor);
+        }
+        
+        const h = canvasFPMain.height;
+        const w = canvasFPMain.width;
+        
+        if (!isDelta) {
+            STATE.offsetY = STATE.offsetY + (h - mouseY) / STATE.scaleY - (h - mouseY) / oldScaleY;
+        }
+        
+        STATE.offsetX = mouseX - (w - 300) + (w - 300 + STATE.offsetX - mouseX) * (STATE.scaleX / oldScaleX);
+        
+        renderAll();
+    }, { passive: false });
+
+    if (!isDelta) {
+        container.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            
+            const rect = container.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const price = yToPrice(y);
+            
+            const roundedPrice = Math.floor(price / CONFIG.tickSize) * CONFIG.tickSize;
+            
+            navigator.clipboard.writeText(roundedPrice.toFixed(1)).then(() => {
+                showToast(`已复制价格: ${roundedPrice.toFixed(1)}`);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
+        });
+    }
+}
+
+bindChartEvents(fpContainer, false);
+bindChartEvents(deltaContainer, true);
+
+// Toast 提示
+function showToast(msg) {
+    let toast = document.getElementById('toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.style.position = 'absolute';
+        toast.style.top = '50px';
+        toast.style.left = '50%';
+        toast.style.transform = 'translateX(-50%)';
+        toast.style.background = 'rgba(38, 166, 154, 0.9)';
+        toast.style.color = '#fff';
+        toast.style.padding = '8px 16px';
+        toast.style.borderRadius = '4px';
+        toast.style.zIndex = '1000';
+        toast.style.pointerEvents = 'none';
+        toast.style.transition = 'opacity 0.3s';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    toast.style.opacity = '1';
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.style.display = 'none', 300);
+    }, 2000);
+}
+
+// VP 面板悬停事件
+vpContainer.addEventListener('mousemove', e => {
+    const rect = vpContainer.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    
+    const viewMaxP = yToPrice(0);
+    const viewMinP = yToPrice(canvasFPMain.height);
+    const priceRange = viewMaxP - viewMinP;
+    
+    // 从 VP 局部坐标推算出悬停价格
+    const hoverPriceRaw = viewMinP + ((canvasVP.height - y) / canvasVP.height) * priceRange;
+    
+    drawVolumeProfileWalls(); // 先清空并重绘基础图形
+    drawVPHoverByPrice(hoverPriceRaw); // 再画提示框
+});
+
+vpContainer.addEventListener('mouseleave', () => {
+    // 鼠标离开时重绘基础 VP 面板，清除 hover 线
+    drawVolumeProfileWalls();
+});
+
+function updateTooltip(e, x, y, inDelta) {
+    const idx = xToIndex(x);
+    
+    if (idx >= 0 && idx < STATE.footprints.length) {
+        const bar = STATE.footprints[idx];
+        
+        let hasContent = false;
+        
+        // 格式化东八区时间 (月-日 时:分:秒)
+        const timeStr = new Date(bar.startTime).toLocaleString('zh-CN', { 
+            timeZone: 'Asia/Shanghai', 
+            month: '2-digit', 
+            day: '2-digit', 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit', 
+            hour12: false 
+        }).replace(/\//g, '-');
+        
+        if (inDelta) {
+            let cumulativeDelta = 0;
+            for (let i = 0; i <= idx; i++) {
+                cumulativeDelta += STATE.footprints[i].totalDelta;
+            }
+            
+            tooltip.innerHTML = `
+<b>Bar Delta & CVD</b>
+-----------------
+时间: ${timeStr}
+Delta: <span style="color:${bar.totalDelta>0?'var(--buy-color)':'var(--sell-color)'}">${bar.totalDelta > 0 ? '+' : ''}${bar.totalDelta.toFixed(2)}</span>
+CVD:   <span style="color:var(--poc-color)">${cumulativeDelta > 0 ? '+' : ''}${cumulativeDelta.toFixed(2)}</span>
+            `;
+            hasContent = true;
+        } else {
+            const p = Math.floor(yToPrice(y) / CONFIG.tickSize) * CONFIG.tickSize;
+            if (bar.cells.has(p)) {
+                const cell = bar.cells.get(p);
+                const isImbB = cell.buyImbalance ? '🔥' : '';
+                const isImbS = cell.sellImbalance ? '🔥' : '';
+                
+                tooltip.innerHTML = `
+<b>Price: ${p.toFixed(1)}</b>
+-----------------
+时间: ${timeStr}
+Ask(卖量): <span style="color:var(--sell-color)">${cell.sellVol.toFixed(2)}</span> ${isImbS}
+Bid(买量): <span style="color:var(--buy-color)">${cell.buyVol.toFixed(2)}</span> ${isImbB}
+Delta:   <span style="color:${cell.delta>0?'var(--buy-color)':'var(--sell-color)'}">${cell.delta > 0 ? '+' : ''}${cell.delta.toFixed(2)}</span>
+Total:   ${cell.totalVol.toFixed(2)}
+                `;
+                hasContent = true;
+            }
+        }
+
+        if (hasContent) {
+            tooltip.style.display = 'block';
+            
+            // 获取 tooltip 的实际宽高，用于动态计算位置，避免遮挡和溢出
+            const rect = tooltip.getBoundingClientRect();
+            let tLeft = e.clientX + 15;
+            let tTop = e.clientY + 15;
+            
+            // 如果右侧空间不够，让 tooltip 显示在鼠标左侧
+            if (tLeft + rect.width > window.innerWidth - 10) {
+                tLeft = e.clientX - rect.width - 15;
+            }
+            
+            // 如果底部空间不够，让 tooltip 显示在鼠标上方
+            if (tTop + rect.height > window.innerHeight - 10) {
+                tTop = e.clientY - rect.height - 15;
+            }
+            
+            tooltip.style.left = tLeft + 'px';
+            tooltip.style.top = tTop + 'px';
+            return;
+        }
+    }
+    tooltip.style.display = 'none';
+}
+
+// 顶部按钮控制 (周期切换)
+const TF_MAP = {
+    1: '1m',
+    5: '5m',
+    15: '15m',
+    60: '1h',
+    240: '4h',
+    1440: '1d'
+};
+
+document.querySelectorAll('.btn-group .btn[data-tf]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        // 移除其他按钮的 active 状态
+        document.querySelectorAll('.btn-group .btn[data-tf]').forEach(b => b.classList.remove('active'));
+        // 激活当前按钮
+        e.target.classList.add('active');
+        
+        // 更新周期配置 (以分钟为单位转换为毫秒)
+        const tfMinutes = parseInt(e.target.getAttribute('data-tf'));
+        CONFIG.timeframe = tfMinutes * 60 * 1000;
+        currentBinanceTF = TF_MAP[tfMinutes];
+        
+        // 重新获取历史数据并连接 WebSocket
+        STATE.historyTicks = [];
+        loadHistoricalAndConnect();
+    });
+});
+
+// 顶部按钮控制 (播放/暂停)
+document.getElementById('btn-play').addEventListener('click', (e) => {
+    const wasRunning = STATE.isRunning;
+    STATE.isRunning = true;
+    e.target.classList.add('active');
+    document.getElementById('btn-pause').classList.remove('active');
+    document.getElementById('conn-status').textContent = '实时数据同步中...';
+    document.getElementById('conn-dot').style.backgroundColor = 'var(--buy-color)';
+    
+    // 恢复中心视角
+    STATE.offsetX = 0;
+    const rect = fpContainer.getBoundingClientRect();
+    STATE.offsetY = (rect.height / 2) - (STATE.currentPrice / CONFIG.tickSize) * CONFIG.rowHeight;
+    
+    if (!wasRunning) {
+        loadHistoricalAndConnect();
+        requestAnimationFrame(renderLoop);
+    }
+});
+
+document.getElementById('btn-pause').addEventListener('click', (e) => {
+    STATE.isRunning = false;
+    e.target.classList.add('active');
+    document.getElementById('btn-play').classList.remove('active');
+    document.getElementById('conn-status').textContent = '回放/浏览模式';
+    document.getElementById('conn-dot').style.backgroundColor = '#ff9800';
+    STATE.profileNotification = null;
+    renderAll();
+});
+
+// K 线图渲染模式切换
+document.getElementById('fp-mode-select').addEventListener('change', (e) => {
+    STATE.fpMode = e.target.value;
+    renderAll();
+});
+
+// 测量工具
+document.getElementById('btn-ruler').addEventListener('click', (e) => {
+    STATE.rulerMode = !STATE.rulerMode;
+    if (STATE.rulerMode) {
+        e.target.classList.add('active');
+        STATE.rulerStart = null;
+        STATE.rulerCurrent = null;
+        fpContainer.style.cursor = 'crosshair';
+        showToast('已开启测量标尺，在主图表中按住鼠标拖拽测量');
+    } else {
+        e.target.classList.remove('active');
+        STATE.rulerStart = null;
+        STATE.rulerCurrent = null;
+        fpContainer.style.cursor = 'default';
+        renderAll();
+    }
+});
+
+// 截图功能
+document.getElementById('btn-screenshot').addEventListener('click', () => {
+    showToast('正在生成截图，请稍候...');
+    html2canvas(document.body, {
+        backgroundColor: '#131722',
+        useCORS: true,
+        logging: false
+    }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = `pro_order_flow_${new Date().getTime()}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+        showToast('截图已保存');
+    }).catch(err => {
+        console.error('Screenshot failed:', err);
+        showToast('截图失败，请查看控制台');
+    });
+});
+
+// 当前 K 线倒计时更新
+setInterval(() => {
+    const countdownEl = document.getElementById('candle-countdown');
+    if (!countdownEl || !CONFIG.timeframe) return;
+    
+    const now = Date.now();
+    // 计算下一个周期整点的时间戳
+    const nextBarTime = Math.floor(now / CONFIG.timeframe) * CONFIG.timeframe + CONFIG.timeframe;
+    const remainingMs = nextBarTime - now;
+    
+    if (remainingMs > 0) {
+        const totalSecs = Math.floor(remainingMs / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+        
+        let timeStr = '';
+        if (hours > 0) {
+            timeStr += hours.toString().padStart(2, '0') + ':';
+        }
+        timeStr += mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+        
+        countdownEl.textContent = '⏳ ' + timeStr;
+    } else {
+        countdownEl.textContent = '⏳ 00:00';
+    }
+}, 1000);
+
+// ================= 启动 =================
+setTimeout(() => {
+    resizeCanvas();
+    initEngine();
+}, 100);
+
+</script>
+</body>
+</html>
