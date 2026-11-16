@@ -18,6 +18,34 @@ npm start
 默认地址 `http://127.0.0.1:3104/`；原页面路径 `/pro_order_flow.html` 仍可访问。
 默认不带凭证、不复制原 `.env`、不自动迁移存档。代理仅通过终端环境变量设置，不写入代码或 `.env`。
 
+### 使用 pnpm 安装
+
+`better-sqlite3` 必须执行安装脚本才能下载或编译本机原生模块。
+`ERR_PNPM_IGNORED_BUILDS` 表示 pnpm 尚未批准这个脚本，不代表数据库损坏或 Node 版本不匹配。
+项目的 `pnpm-workspace.yaml` 使用 pnpm >= 10.26（包括 11）的 `allowBuilds`，
+仅批准 `better-sqlite3`。同步该文件后，在服务器项目目录执行：
+
+```bash
+pnpm --version
+pnpm install
+pnpm rebuild better-sqlite3
+node -e "const db = require('better-sqlite3')(':memory:'); console.log(db.prepare('SELECT 1 AS ok').get()); db.close();"
+pnpm test
+```
+
+内存数据库检查输出 `{ ok: 1 }` 即表示原生模块可用，不会修改归档数据。
+尚未同步配置或使用较早的 pnpm 10 时，可以运行 `pnpm approve-builds`，
+按空格选中 `better-sqlite3`，回车后确认，再执行上述安装、重建和检查。
+不要通过全局允许所有依赖脚本来绕过安全检查。
+
+Node 20.20.2 并不是这条构建许可报错的原因；项目测试基线为 Node 22。
+切换 Node 主版本后须在目标服务器重新安装并重建原生依赖，不要复制本地 `node_modules`。
+若批准后出现 `node-gyp` 编译错误，需另外检查 Python、make、C++ 工具链；
+若出现 `GLIBC` / `GLIBCXX` 错误，则需核对系统运行库与二进制兼容性。
+CentOS Linux 8 已停止维护，长期部署建议迁移到仍受支持的系统。
+无论使用哪种包管理器，都应保留服务器 `.env` 和 `data/`；本项目现有锁文件为
+`package-lock.json`，原有 `npm ci` 安装流程仍可使用。
+
 ## 配置
 
 | 参数 | 默认值 | 说明 |
