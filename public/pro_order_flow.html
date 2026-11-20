@@ -420,6 +420,7 @@ const STATE = {
     historyTicks: [],     // 保存所有的 tick 数据
     footprints: [],       // 聚合后的 K 线 Footprint 数据
     globalVolumeProfile: new Map(), // 仅当前可见时间范围的成交分布
+    balanceRange: null,       // detectBalance 识别出的盘整区间 { vah, val, vpoc, startIdx, endIdx, length }
     archiveVersion: 0,
     archiveAvailable: false,
     profileRange: null,
@@ -763,6 +764,7 @@ function buildHistoricalFootprint(klines, realOrderFlow = [], prepend = false) {
     if (!prepend) {
         STATE.footprints = [];
         STATE.globalVolumeProfile.clear();
+        STATE.balanceRange = null;
     }
     
     // 将后端传来的真实 tick 数据转为 map 方便 O(1) 查找
@@ -1245,6 +1247,8 @@ function updateVisibleProfile() {
     STATE.profileCacheKey = key;
     STATE.profileRange = range;
     STATE.globalVolumeProfile = OrderFlowProfile.aggregate(bars);
+    // 识别可见 bars 中最长的一段盘整区间；识别失败时为 null，由 drawVolumeProfileWalls 走旧的 70% 算法
+    STATE.balanceRange = OrderFlowProfile.detectBalance(bars);
     const rangeNode = document.getElementById('vp-range');
     const coverageNode = document.getElementById('vp-coverage');
     const format = time => new Date(time).toLocaleString('zh-CN', {
@@ -1909,6 +1913,13 @@ function drawVolumeProfileWalls() {
         }
         vah = allLevels[upperIdx].price;
         val = allLevels[lowerIdx].price;
+    }
+
+    // 1.5 若已识别出盘整区间，优先用其 vPOC/VAH/VAL 覆盖上面的 70% 算法结果
+    if (STATE.balanceRange) {
+        vah = STATE.balanceRange.vah;
+        val = STATE.balanceRange.val;
+        vpocLevel = STATE.balanceRange.vpoc;
     }
 
     // 2. 找到在可视范围内的最大总成交量，用于归一化宽度
