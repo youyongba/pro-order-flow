@@ -365,7 +365,7 @@
             <div class="panel-section" style="flex: 0 0 250px; min-height: 250px; max-height: 250px;">
                 <div class="section-header">
                     <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Volume Profile & Buy/Sell Walls</span>
-                    <span style="color:var(--text-muted);flex-shrink:0">VA 70%</span>
+                    <span title="按当前可见时间和价格范围的成交量计算" style="color:var(--text-muted);flex-shrink:0">视图 VA 70%</span>
                 </div>
                 <div id="vp-range" style="padding:3px 10px;font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">可见范围 · 等待归档</div>
                 <div id="vp-coverage" style="padding:0 10px 3px;font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">未采集的历史不会补造</div>
@@ -1247,7 +1247,7 @@ function updateVisibleProfile() {
     STATE.profileCacheKey = key;
     STATE.profileRange = range;
     STATE.globalVolumeProfile = OrderFlowProfile.aggregate(bars);
-    // 识别可见 bars 中最长的一段盘整区间；识别失败时为 null，由 drawVolumeProfileWalls 走旧的 70% 算法
+    // 盘整结果独立保留，不覆盖右侧视图的 70% 价值区。
     STATE.balanceRange = OrderFlowProfile.detectBalance(bars);
     const rangeNode = document.getElementById('vp-range');
     const coverageNode = document.getElementById('vp-coverage');
@@ -1857,9 +1857,10 @@ function drawVolumeProfileWalls() {
     
     STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
         const pLevel = parseFloat(pLevelStr);
+        if (pLevel < viewMinP || pLevel > viewMaxP || !(vData.total > 0)) return;
         totalVol += vData.total;
-        allLevels.push({ price: pLevel, vol: vData.total });
-        if (vData.total > maxVolOverall) {
+        allLevels.push({ price: pLevel, vol: vData.total, data: vData });
+        if (vData.total > maxVolOverall || (vData.total === maxVolOverall && pLevel < vpocLevel)) {
             maxVolOverall = vData.total;
             vpocLevel = pLevel;
         }
@@ -1915,30 +1916,19 @@ function drawVolumeProfileWalls() {
         val = allLevels[lowerIdx].price;
     }
 
-    // 1.5 若已识别出盘整区间，优先用其 vPOC/VAH/VAL 覆盖上面的 70% 算法结果
-    if (STATE.balanceRange) {
-        vah = STATE.balanceRange.vah;
-        val = STATE.balanceRange.val;
-        vpocLevel = STATE.balanceRange.vpoc;
+    if (vpocLevel === null) {
+        STATE.profileNotification = null;
+        ctxVP.font = '11px Arial';
+        ctxVP.textAlign = 'center';
+        ctxVP.fillStyle = '#aaa';
+        ctxVP.fillText('当前可见价格范围无成交', w / 2, h / 2);
+        return;
     }
 
-    // 2. 找到在可视范围内的最大总成交量，用于归一化宽度
-    let maxTotalVol = 0;
-    STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
-        const pLevel = parseFloat(pLevelStr);
-        // 稍微放宽一点边界
-        if (pLevel >= viewMinP - CONFIG.tickSize && pLevel <= viewMaxP + CONFIG.tickSize) {
-            if (vData.total > maxTotalVol) maxTotalVol = vData.total;
-        }
-    });
-
-    if (maxTotalVol === 0) maxTotalVol = 1; // 防止除零
+    const maxTotalVol = maxVolOverall;
     
     // 3. 绘制柱状图
-    STATE.globalVolumeProfile.forEach((vData, pLevelStr) => {
-        const pLevel = parseFloat(pLevelStr);
-        // 只绘制在主图可视范围内的筹码，避免因历史极值把图形压缩成一条线
-        if (pLevel < viewMinP - CONFIG.tickSize || pLevel > viewMaxP + CONFIG.tickSize) return;
+    allLevels.forEach(({ price: pLevel, data: vData }) => {
 
         // 判断是否在 Value Area 内
         const inVA = pLevel >= val && pLevel <= vah;
@@ -1965,10 +1955,13 @@ function drawVolumeProfileWalls() {
     ctxVP.textAlign = 'right';
     ctxVP.textBaseline = 'middle';
 
-    const drawLevelLine = (price, color, label) => {
-        if (price < viewMinP || price > viewMaxP) return; // 不在可视范围内则不画
-        const y = h - ((price - viewMinP) / priceRange) * h - ((CONFIG.tickSize / priceRange) * h) / 2;
-        
+    const markers = [
+        [vah, '#6699ff', 'VAH'], [vpocLevel, '#ffca28', 'vPOC'], [val, '#6699ff', 'VAL']
+    ].map(([price, color, name]) => ({
+        y: Math.max(0.5, Math.min(h - 0.5, h * (viewMaxP - price) / priceRange)),
+        color, label: `${name} ${price.toFixed(1)}`
+    }));
+    for (const { y, color } of markers) {
         ctxVP.strokeStyle = color;
         ctxVP.lineWidth = 1;
         ctxVP.setLineDash([2, 2]);
@@ -1977,25 +1970,27 @@ function drawVolumeProfileWalls() {
         ctxVP.lineTo(w, y);
         ctxVP.stroke();
         ctxVP.setLineDash([]);
+    }
         
-        // 背景框
+    // Keep labels distinct even when all three levels fall on the same price.
+    const gap = Math.min(16, h / 3);
+    let nextY = gap / 2;
+    markers.forEach(({ y, label, color }, i) => {
+        const labelY = Math.max(nextY, Math.min(y, h - gap * (markers.length - i - 0.5)));
+        nextY = labelY + gap;
         const textWidth = ctxVP.measureText(label).width;
         ctxVP.fillStyle = 'rgba(19, 23, 34, 0.8)';
-        ctxVP.fillRect(w - textWidth - 6, y - 8, textWidth + 6, 16);
+        ctxVP.fillRect(w - textWidth - 6, labelY - 8, textWidth + 6, 16);
         
         // 文本
         ctxVP.fillStyle = color;
-        ctxVP.fillText(label, w - 2, y);
-    };
-
-    if (vah !== null) drawLevelLine(vah, '#2962ff', 'VAH'); // 蓝色 VAH
-    if (val !== null) drawLevelLine(val, '#2962ff', 'VAL'); // 蓝色 VAL
-    if (vpocLevel !== null) drawLevelLine(vpocLevel, '#ffca28', 'vPOC'); // 黄色 vPOC
+        ctxVP.fillText(label, w - 2, labelY);
+    });
     
     // Notify only market changes within an unchanged live time range.
     if (vah !== null && val !== null && vpocLevel !== null) {
         const tf = document.querySelector('.btn-group .btn.active[data-tf]').innerText;
-        const range = `${tf}:${STATE.profileRange?.start}:${STATE.profileRange?.end}`;
+        const range = `${tf}:${STATE.profileRange?.start}:${STATE.profileRange?.end}:${viewMinP}:${viewMaxP}`;
         STATE.profileNotification = OrderFlowProfile.notification(
             STATE.profileNotification, range, `${vpocLevel}:${vah}:${val}`,
             STATE.isRunning && STATE.archiveAvailable);
